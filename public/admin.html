@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Painel do Barbeiro — Corte Fino</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body>
+  <header class="topo"><div class="wrap">
+    <div class="logo">💈 PAINEL <span>ADMIN</span></div>
+    <nav class="linha">
+      <a class="btn ghost small" href="/">Ver site</a>
+      <button class="btn ghost small" id="btnSair" hidden>Sair</button>
+    </nav>
+  </div></header>
+
+  <main class="wrap">
+    <!-- LOGIN -->
+    <section id="telaLogin" class="secao" style="max-width:420px;margin:0 auto">
+      <h2>Entrar</h2>
+      <p class="sub">Acesso do barbeiro / administrador.</p>
+      <div class="card">
+        <label for="loginEmail">E-mail</label>
+        <input id="loginEmail" type="email" value="admin@barbearia.com" />
+        <label for="loginSenha">Senha</label>
+        <input id="loginSenha" type="password" value="admin123" />
+        <div class="linha" style="margin-top:12px"><button class="btn gold" id="btnLogin" style="width:100%">Entrar</button></div>
+        <div id="loginErro" class="erro" hidden></div>
+        <p class="meta">Padrão do seed: admin@barbearia.com / admin123 (troque no .env).</p>
+      </div>
+    </section>
+
+    <!-- PAINEL -->
+    <div id="painel" hidden>
+      <section class="secao">
+        <h2>Visão geral — hoje</h2>
+        <p class="sub" id="hojeLbl"></p>
+        <div class="kpis">
+          <div class="card"><div class="num" id="kpiTotal">–</div><div class="meta">clientes</div></div>
+          <div class="card"><div class="num" id="kpiFat">–</div><div class="meta">faturamento est.</div></div>
+          <div class="card"><div class="num" id="kpiProx">–</div><div class="meta">próximo horário</div></div>
+        </div>
+      </section>
+
+      <section class="secao">
+        <h2>Agenda</h2>
+        <div class="linha">
+          <input type="date" id="filtroData" style="max-width:200px" />
+          <select id="filtroStatus" style="max-width:200px">
+            <option value="">Todos os status</option>
+            <option value="confirmado">Confirmado</option>
+            <option value="concluido">Concluído</option>
+            <option value="cancelado">Cancelado</option>
+          </select>
+          <button class="btn" id="btnRecarregar">Atualizar</button>
+        </div>
+        <div class="card" style="margin-top:12px;overflow-x:auto">
+          <table class="tabela"><thead><tr>
+            <th>Hora</th><th>Cliente</th><th>Serviço</th><th>Barbeiro</th><th>Status</th><th>Ações</th>
+          </tr></thead><tbody id="corpoAgenda"></tbody></table>
+        </div>
+      </section>
+
+      <section class="secao">
+        <h2>Configurações da agenda</h2>
+        <p class="sub">Expediente por dia da semana + bloqueios (folgas/feriados).</p>
+        <div id="gradeFunc" class="diasemana"></div>
+        <div class="linha" style="margin-top:10px"><button class="btn gold" id="btnSalvarFunc">Salvar expediente</button></div>
+        <div class="card" style="margin-top:12px">
+          <h3>Bloquear dia / horário</h3>
+          <div class="linha">
+            <input type="date" id="bloqData" style="max-width:180px" />
+            <input type="time" id="bloqIni" style="max-width:130px" />
+            <input type="time" id="bloqFim" style="max-width:130px" />
+            <input id="bloqMotivo" placeholder="Motivo (ex: feriado)" style="flex:1;min-width:160px" />
+            <button class="btn" id="btnBloquear">Bloquear</button>
+          </div>
+          <div id="listaBloq" class="meta" style="margin-top:8px"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <script src="/js/admin.js"></script>
+</body>
+</html>

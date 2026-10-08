@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Barbearia Corte Fino — Agende seu horário</title>
+  <meta name="description" content="Agendamento online: corte, barba e combo. Escolha o serviço, o barbeiro e o horário." />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body>
+  <header class="topo">
+    <div class="wrap">
+      <div class="logo">💈 CORTE <span>FINO</span></div>
+      <nav class="linha">
+        <a class="btn ghost small" href="#servicos">Serviços</a>
+        <a class="btn gold small" href="#agendar">Agendar agora</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <!-- HERO -->
+    <section class="hero">
+      <div class="selo">BARBEARIA PREMIUM • DESDE 2015</div>
+      <h1>Seu melhor visual<br />começa aqui.</h1>
+      <p>Corte, barba e cuidado de verdade. Agende em menos de 1 minuto, sem fila e sem espera.</p>
+      <a class="btn gold" href="#agendar">Agendar agora</a>
+      <div class="meta" style="margin-top:10px">Ter–Sáb • 09h–19h • Resposta no WhatsApp</div>
+    </section>
+
+    <!-- SERVIÇOS -->
+    <section id="servicos" class="secao">
+      <h2>Serviços &amp; preços</h2>
+      <p class="sub">Valores transparentes, duração estimada por atendimento.</p>
+      <div id="listaServicos" class="grid cols3"><div class="card">Carregando…</div></div>
+    </section>
+
+    <!-- AGENDAMENTO (5 passos) -->
+    <section id="agendar" class="secao">
+      <h2>Agende seu horário</h2>
+      <p class="sub">Passo a passo: serviço → profissional → data/hora → seus dados → confirmação.</p>
+
+      <div class="passos" id="barraPassos">
+        <div class="passo on"></div><div class="passo"></div><div class="passo"></div><div class="passo"></div><div class="passo"></div>
+      </div>
+
+      <div class="card">
+        <!-- Passo 1 -->
+        <div data-etapa="1">
+          <h3>1 · Escolha o serviço</h3>
+          <div id="etapaServicos" class="grid cols2"></div>
+        </div>
+        <!-- Passo 2 -->
+        <div data-etapa="2" hidden>
+          <h3>2 · Escolha o profissional</h3>
+          <div id="etapaProfs" class="grid cols2"></div>
+          <div class="linha" style="margin-top:12px">
+            <button class="btn ghost" data-voltar>Voltar</button>
+          </div>
+        </div>
+        <!-- Passo 3 -->
+        <div data-etapa="3" hidden>
+          <h3>3 · Data e horário</h3>
+          <label for="campoData">Dia</label>
+          <input type="date" id="campoData" />
+          <label>Horários vagos</label>
+          <div id="listaHoras" class="horas"><span class="meta">Escolha uma data.</span></div>
+          <div class="linha" style="margin-top:12px">
+            <button class="btn ghost" data-voltar>Voltar</button>
+          </div>
+        </div>
+        <!-- Passo 4 -->
+        <div data-etapa="4" hidden>
+          <h3>4 · Seus dados</h3>
+          <label for="cliNome">Nome</label>
+          <input id="cliNome" placeholder="Seu nome" autocomplete="name" />
+          <label for="cliFone">Telefone / WhatsApp</label>
+          <input id="cliFone" placeholder="(11) 99999-9999" inputmode="tel" />
+          <label for="cliEmail">E-mail (opcional)</label>
+          <input id="cliEmail" placeholder="voce@email.com" type="email" />
+          <div class="linha" style="margin-top:12px">
+            <button class="btn ghost" data-voltar>Voltar</button>
+            <button class="btn gold" id="btnConfirmar">Confirmar agendamento</button>
+          </div>
+        </div>
+        <!-- Passo 5 -->
+        <div data-etapa="5" hidden>
+          <h3>5 · Tudo certo! ✅</h3>
+          <div id="confirmBox" class="okbox">Agendamento criado.</div>
+          <div id="resumoFinal" class="resumo"></div>
+          <div class="linha" style="margin-top:12px">
+            <a class="btn gold" id="btnWhats" target="_blank" rel="noopener">Abrir no WhatsApp</a>
+            <button class="btn" id="btnIcs">Salvar no calendário (.ics)</button>
+            <button class="btn ghost" id="btnNovo">Novo agendamento</button>
+          </div>
+        </div>
+        <div id="msgErro" class="erro" hidden></div>
+      </div>
+    </section>
+
+    <footer class="rodape">
+      Feito para a barbearia • Painel do barbeiro em <a href="/admin">/admin</a>
+    </footer>
+  </main>
+
+  <script src="/js/booking.js"></script>
+</body>
+</html>
