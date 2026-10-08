@@ -1,41 +1,61 @@
 <!DOCTYPE html>
+<!-- ==========================================================================
+  admin.html — PAINEL DO BARBEIRO / ADMIN (área privada em /admin).
+  ----------------------------------------------------------------------------
+  BLOCOS DA PÁGINA:
+    1. #telaLogin → formulário de entrada (e-mail + senha → POST /api/auth/login).
+       Visível quando NÃO há token salvo no navegador.
+    2. #painel (começa hidden) → liberado pelo JS após login válido:
+       a) "Visão geral"  → 3 KPIs: #kpiTotal (clientes), #kpiFat (R$ estimado),
+          #kpiProx (próximo horário). Vêm de GET /api/admin/resumo.
+       b) "Agenda"       → filtros (#filtroData, #filtroStatus, #btnRecarregar)
+          + tabela (#corpoAgenda) com botões por linha: ✓ concluir, ✕ cancelar,
+          excluir. Chamam PATCH/DELETE /api/admin/agendamentos/:id.
+       c) "Configurações"→ grade semanal (#gradeFunc + #btnSalvarFunc → PUT
+          /api/admin/funcionamento) e bloqueios (#bloqData/Ini/Fim/Motivo +
+          #btnBloquear → POST /api/admin/bloqueios; lista em #listaBloq).
+  O token JWT fica em localStorage ('bb_token') e é enviado em toda chamada
+  privada via header Authorization: Bearer (ver js/admin.js → api()).
+  ========================================================================== -->
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Painel do Barbeiro — Corte Fino</title>
-  <link rel="stylesheet" href="/css/styles.css" />
+  <title>Painel do Barbeiro — Barber Code</title>
+  <link rel="stylesheet" href="/css/styles.css" /><!-- mesmo tema do site -->
 </head>
 <body>
   <header class="topo"><div class="wrap">
     <div class="logo">💈 PAINEL <span>ADMIN</span></div>
     <nav class="linha">
-      <a class="btn ghost small" href="/">Ver site</a>
-      <button class="btn ghost small" id="btnSair" hidden>Sair</button>
+      <a class="btn ghost small" href="/">Ver site</a><!-- volta p/ área pública -->
+      <button class="btn ghost small" id="btnSair" hidden>Sair</button><!-- apaga token -->
     </nav>
   </div></header>
 
   <main class="wrap">
-    <!-- LOGIN -->
+    <!-- TELA DE LOGIN (única parte visível antes de autenticar) -->
     <section id="telaLogin" class="secao" style="max-width:420px;margin:0 auto">
       <h2>Entrar</h2>
       <p class="sub">Acesso do barbeiro / administrador.</p>
       <div class="card">
         <label for="loginEmail">E-mail</label>
-        <input id="loginEmail" type="email" value="admin@barbearia.com" />
+        <!-- values pré-preenchidos = credenciais do seed, só p/ demonstração -->
+        <input id="loginEmail" type="email" value="admin@barbercode.app" />
         <label for="loginSenha">Senha</label>
         <input id="loginSenha" type="password" value="admin123" />
         <div class="linha" style="margin-top:12px"><button class="btn gold" id="btnLogin" style="width:100%">Entrar</button></div>
-        <div id="loginErro" class="erro" hidden></div>
-        <p class="meta">Padrão do seed: admin@barbearia.com / admin123 (troque no .env).</p>
+        <div id="loginErro" class="erro" hidden></div><!-- msg de falha de login -->
+        <p class="meta">Padrão do seed: admin@barbercode.app / admin123 (troque no .env).</p>
       </div>
     </section>
 
-    <!-- PAINEL -->
+    <!-- PAINEL (hidden até boot() confirmar o token) -->
     <div id="painel" hidden>
+      <!-- a) VISÃO GERAL: 3 cards numéricos do dia selecionado no filtro -->
       <section class="secao">
         <h2>Visão geral — hoje</h2>
-        <p class="sub" id="hojeLbl"></p>
+        <p class="sub" id="hojeLbl"></p><!-- ex.: "quinta-feira, 08 de outubro" -->
         <div class="kpis">
           <div class="card"><div class="num" id="kpiTotal">–</div><div class="meta">clientes</div></div>
           <div class="card"><div class="num" id="kpiFat">–</div><div class="meta">faturamento est.</div></div>
@@ -43,11 +63,12 @@
         </div>
       </section>
 
+      <!-- b) AGENDA: filtros + tabela de agendamentos do dia -->
       <section class="secao">
         <h2>Agenda</h2>
         <div class="linha">
-          <input type="date" id="filtroData" style="max-width:200px" />
-          <select id="filtroStatus" style="max-width:200px">
+          <input type="date" id="filtroData" style="max-width:200px" /><!-- dia exibido -->
+          <select id="filtroStatus" style="max-width:200px"><!-- filtra por situação -->
             <option value="">Todos os status</option>
             <option value="confirmado">Confirmado</option>
             <option value="concluido">Concluído</option>
@@ -55,32 +76,36 @@
           </select>
           <button class="btn" id="btnRecarregar">Atualizar</button>
         </div>
-        <div class="card" style="margin-top:12px;overflow-x:auto">
+        <div class="card" style="margin-top:12px;overflow-x:auto"><!-- scroll horizontal no celular -->
           <table class="tabela"><thead><tr>
             <th>Hora</th><th>Cliente</th><th>Serviço</th><th>Barbeiro</th><th>Status</th><th>Ações</th>
-          </tr></thead><tbody id="corpoAgenda"></tbody></table>
+          </tr></thead><tbody id="corpoAgenda"></tbody></table><!-- linhas via JS -->
         </div>
       </section>
 
+      <!-- c) CONFIGURAÇÕES: expediente semanal + bloqueios -->
       <section class="secao">
         <h2>Configurações da agenda</h2>
         <p class="sub">Expediente por dia da semana + bloqueios (folgas/feriados).</p>
+        <!-- 7 linhas (dom–sáb) geradas pelo JS: checkbox aberto + horários + almoço -->
         <div id="gradeFunc" class="diasemana"></div>
         <div class="linha" style="margin-top:10px"><button class="btn gold" id="btnSalvarFunc">Salvar expediente</button></div>
+        <!-- Bloqueio avulso: data (+faixa opcional) + motivo -->
         <div class="card" style="margin-top:12px">
           <h3>Bloquear dia / horário</h3>
           <div class="linha">
             <input type="date" id="bloqData" style="max-width:180px" />
-            <input type="time" id="bloqIni" style="max-width:130px" />
+            <input type="time" id="bloqIni" style="max-width:130px" /><!-- vazio = dia todo -->
             <input type="time" id="bloqFim" style="max-width:130px" />
             <input id="bloqMotivo" placeholder="Motivo (ex: feriado)" style="flex:1;min-width:160px" />
             <button class="btn" id="btnBloquear">Bloquear</button>
           </div>
-          <div id="listaBloq" class="meta" style="margin-top:8px"></div>
+          <div id="listaBloq" class="meta" style="margin-top:8px"></div><!-- bloqueios + "liberar" -->
         </div>
       </section>
     </div>
   </main>
+  <!-- Lógica do painel: login, KPIs, agenda, expediente e bloqueios -->
   <script src="/js/admin.js"></script>
 </body>
 </html>

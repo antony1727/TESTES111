@@ -1,34 +1,61 @@
-// Servidor Express: APIs + arquivos estáticos do frontend.
-require('dotenv').config();
-const path = require('path');
-const express = require('express');
-const cors = require('cors');
+/**
+ * server.js — Ponto de entrada: sobe o backend + serve o frontend. 🚀
+ * ----------------------------------------------------------------------------
+ * ARQUITETURA (monolito simples, ideal para começar e hospedar barato):
+ *
+ *   Navegador (public/)  ──fetch──►  Express (este arquivo)
+ *        │                                ├── /api/*      → rotas JSON
+ *        │                                └── /*          → arquivos estáticos
+ *        ▼
+ *   SQLite (barbercode.db + better-sqlite3)
+ *
+ * ORDEM DE BOOT (importa a ordem!):
+ *  1. dotenv      → carrega .env (PORT, JWT_SECRET, ADMIN_*, BARBER_WHATSAPP)
+ *  2. ./db        → cria/abre o banco e aplica o schema
+ *  3. ./seed()    → garante dados iniciais (idempotente, ver seed.js)
+ *  4. rotas       → registra /api/auth, /api (públicas) e /api/admin (JWT)
+ *  5. estáticos   → serve public/ (o site) + atalho /admin (o painel)
+ *  6. listen      → começa a ouvir na porta
+ *
+ * EXECUÇÃO: `npm start` (ou `npm run dev` com auto-reload via --watch).
+ */
+require('dotenv').config(); // 1) lê o arquivo .env para process.env.*
+const path = require('path'); // monta caminhos de arquivo multi-plataforma
+const express = require('express'); // framework HTTP (rotas + middlewares)
+const cors = require('cors'); // libera chamadas de outras origens (ex.: front separado)
 
-require('./db');       // garante criação do banco/schema
-require('./seed');     // garante seed — com require.main check ele só loga via função? chamamos direto:
-try { require('./seed')(); } catch {} // idempotente
+require('./db'); // 2) garante banco + tabelas (só importar já executa)
+const seed = require('./seed'); // 3a) importa a função de carga inicial…
+try { seed(); } catch {} // 3b) …e executa (idempotente: não duplica nada)
 
-const authRoutes = require('./routes/auth');
-const publicRoutes = require('./routes/public');
-const adminRoutes = require('./routes/admin');
+// 4) Importa os 3 grupos de rotas (cada um é um express.Router).
+const authRoutes = require('./routes/auth'); // POST /api/auth/login
+const publicRoutes = require('./routes/public'); // GET serviços/profs/disponibilidade + POST agendar
+const adminRoutes = require('./routes/admin'); // tudo do painel (protegido por JWT)
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+app.use(cors()); // permite o frontend chamar a API mesmo hospedado em outro domínio
+app.use(express.json()); // entende BODY em JSON (req.body) nas rotas POST/PUT/PATCH
 
-// APIs
-app.use('/api/auth', authRoutes);
-app.use('/api', publicRoutes);          // /api/servicos, /api/disponibilidade, /api/agendamentos
-app.use('/api/admin', adminRoutes);     // protegidas por JWT
+// ---- APIs (JSON) ------------------------------------------------------------
+// Cada use() monta um grupo de rotas sob um prefixo:
+app.use('/api/auth', authRoutes); // → /api/auth/login
+app.use('/api', publicRoutes); // → /api/servicos, /api/disponibilidade, /api/agendamentos
+app.use('/api/admin', adminRoutes); // → /api/admin/* (todas exigem Authorization: Bearer)
 
-// Config pública (ex: whatsapp da barbearia p/ o frontend montar o link)
+// Configuração pública e SEGURA de expor: só o número do WhatsApp, que o
+// frontend usa para montar o link "Abrir no WhatsApp" (wa.me). NADA secreto
+// (senhas, JWT_SECRET) sai por aqui.
 app.get('/api/config', (req, res) => {
   res.json({ whatsapp: process.env.BARBER_WHATSAPP || '' });
 });
 
-// Frontend estático
+// ---- Frontend (arquivos estáticos) ------------------------------------------
+// Serve tudo de public/ direto: / → index.html, /css/*.css, /js/*.js…
 app.use(express.static(path.join(__dirname, '..', 'public')));
+// Atalho amigável: /admin entrega o painel (mesmo arquivo que /admin.html).
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'admin.html')));
 
+// ---- Sobe o servidor ---------------------------------------------------------
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`💈 Barbearia no ar: http://localhost:${PORT} | painel: http://localhost:${PORT}/admin`));
+app.listen(PORT, () => console.log(`💈 Barber Code no ar: http://localhost:${PORT} | painel: http://localhost:${PORT}/admin`));

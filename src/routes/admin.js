@@ -1,14 +1,39 @@
-// Rotas privadas do painel — todas exigem JWT (authObrigatorio).
+/**
+ * routes/admin.js — API privada do painel do barbeiro (EXIGE login JWT).
+ * ----------------------------------------------------------------------------
+ * PROTEÇÃO: `router.use(authObrigatorio)` no topo aplica o porteiro JWT a
+ * TODAS as rotas deste arquivo. Sem token válido → 401 automático.
+ *
+ * ROTAS:
+ *  GET    /api/admin/resumo?data=AAAA-MM-DD        → KPIs do dia (cards do topo)
+ *  GET    /api/admin/agendamentos?data=&status=&profissional_id=
+ *                                                  → agenda filtrada (tabela)
+ *  PATCH  /api/admin/agendamentos/:id  {status}    → conclui/cancela/reabre
+ *  DELETE /api/admin/agendamentos/:id              → exclui definitivo
+ *  GET    /api/admin/funcionamento                 → lê expediente semanal
+ *  PUT    /api/admin/funcionamento    {dias:[...]} → salva expediente semanal
+ *  GET    /api/admin/bloqueios                     → lista folgas/feriados
+ *  POST   /api/admin/bloqueios        {data,...}   → cria bloqueio
+ *  DELETE /api/admin/bloqueios/:id                 → libera bloqueio
+ */
 const express = require('express');
 const db = require('../db');
-const { authObrigatorio } = require('../middleware/auth');
+const { authObrigatorio } = require('../middleware/auth'); // porteiro JWT
 
 const router = express.Router();
-router.use(authObrigatorio);
+router.use(authObrigatorio); // ← a partir daqui, tudo exige login
 
-// Resumo do dia: total, faturamento estimado (não-cancelados) e próximos.
+/**
+ * GET /api/admin/resumo — alimenta os 3 cards "Visão geral".
+ * Retorna: total de clientes do dia, faturamento ESTIMADO em centavos
+ * (soma dos NÃO-cancelados: confirmado conta como receita prevista) e os
+ * próximos 5 confirmados futuros + contagem por status.
+ */
 router.get('/resumo', (req, res) => {
+  // ?data= opcional; sem ele, usa hoje (ISO YYYY-MM-DD).
   const data = req.query.data || new Date().toISOString().slice(0, 10);
+
+  // Busca tudo do dia com JOIN (nomes e preços), ordenado por hora (agenda).
   const lista = db.prepare(`
     SELECT a.*, s.nome AS servico_nome, s.preco_centavos, p.nome AS profissional_nome
     FROM agendamentos a
@@ -16,10 +41,15 @@ router.get('/resumo', (req, res) => {
     JOIN profissionais p ON p.id = a.profissional_id
     WHERE a.data = ? ORDER BY a.hora
   `).all(data);
+
+  // Faturamento estimado: soma preços de tudo que NÃO foi cancelado.
   const validos = lista.filter((a) => a.status !== 'cancelado');
   const faturamento = validos.reduce((t, a) => t + (a.preco_centavos || 0), 0);
-  const agora = new Date().toTimeString().slice(0, 5);
+
+  // "Próximos": confirmados cuja hora ainda não passou (ou dias futuros).
+  const agora = new Date().toTimeString().slice(0, 5); // 'HH:MM' atual
   const proximos = lista.filter((a) => a.status === 'confirmado' && (data > new Date().toISOString().slice(0, 10) || a.hora >= agora)).slice(0, 5);
+
   res.json({ data, total: lista.length, faturamento_centavos: faturamento, proximos, por_status: {
     confirmado: lista.filter((a) => a.status === 'confirmado').length,
     concluido: lista.filter((a) => a.status === 'concluido').length,
@@ -27,7 +57,13 @@ router.get('/resumo', (req, res) => {
   }});
 });
 
-// Lista agenda com filtros ?data=&status=&profissional_id=
+/**
+ * GET /api/admin/agendamentos — tabela da agenda com filtros opcionais.
+ * Filtros combináveis: ?data=AAAA-MM-DD, ?status=confirmado|concluido|cancelado,
+ * ?profissional_id=N. Truque `WHERE 1=1`: permite empilhar ANDs sem se
+ * preocupar com qual filtro veio primeiro. LIMIT 300 = trava de segurança
+ * para a tabela nunca travar o navegador.
+ */
 router.get('/agendamentos', (req, res) => {
   const { data, status, profissional_id } = req.query;
   let sql = `
@@ -35,7 +71,7 @@ router.get('/agendamentos', (req, res) => {
     FROM agendamentos a
     JOIN servicos s ON s.id = a.servico_id
     JOIN profissionais p ON p.id = a.profissional_id WHERE 1=1`;
-  const params = [];
+  const params = []; // parâmetros na MESMA ordem dos ANDs (evita SQL injection)
   if (data) { sql += ' AND a.data = ?'; params.push(data); }
   if (status) { sql += ' AND a.status = ?'; params.push(status); }
   if (profissional_id) { sql += ' AND a.profissional_id = ?'; params.push(profissional_id); }
@@ -43,7 +79,11 @@ router.get('/agendamentos', (req, res) => {
   res.json(db.prepare(sql).all(...params));
 });
 
-// Troca de status: confirmado | concluido | cancelado
+/**
+ * PATCH /api/admin/agendamentos/:id — troca o status (botões ✓ / ✕ da tabela).
+ * BODY: { status: 'confirmado' | 'concluido' | 'cancelado' }.
+ * A whitelist abaixo impede valores inventados. 404 se o id não existir.
+ */
 router.patch('/agendamentos/:id', (req, res) => {
   const { status } = req.body || {};
   if (!['confirmado', 'concluido', 'cancelado'].includes(status)) {
@@ -54,17 +94,31 @@ router.patch('/agendamentos/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+/**
+ * DELETE /api/admin/agendamentos/:id — exclusão DEFINITIVA (frontend pede
+ * confirmação antes). Para "cancelar sem apagar o histórico", prefira o
+ * PATCH com status=cancelado. 404 se o id não existir.
+ */
 router.delete('/agendamentos/:id', (req, res) => {
   const r = db.prepare('DELETE FROM agendamentos WHERE id = ?').run(req.params.id);
   if (!r.changes) return res.status(404).json({ erro: 'Agendamento não encontrado.' });
   res.json({ ok: true });
 });
 
-// ---- Configurações: expediente ----
+// ---- EXPEDIENTE SEMANAL (tabela horarios_funcionamento) --------------------
+
+/** GET /api/admin/funcionamento — devolve as 7 linhas (dom=0 … sáb=6). */
 router.get('/funcionamento', (req, res) => {
   res.json(db.prepare('SELECT * FROM horarios_funcionamento ORDER BY dia_semana').all());
 });
 
+/**
+ * PUT /api/admin/funcionamento — salva o expediente da semana inteira.
+ * BODY: { dias: [{ dia_semana, aberto, abertura, fechamento,
+ *                   almoco_inicio, almoco_fim }, ...] }
+ * Usa UPSERT (INSERT … ON CONFLICT DO UPDATE) dentro de UMA transação:
+ * ou salva os 7 dias, ou não salva nenhum (nunca fica "meio salvo").
+ */
 router.put('/funcionamento', (req, res) => {
   const dias = req.body?.dias;
   if (!Array.isArray(dias)) return res.status(400).json({ erro: 'Envie { dias: [...] }.' });
@@ -74,16 +128,24 @@ router.put('/funcionamento', (req, res) => {
     ON CONFLICT(dia_semana) DO UPDATE SET aberto=excluded.aberto, abertura=excluded.abertura,
       fechamento=excluded.fechamento, almoco_inicio=excluded.almoco_inicio, almoco_fim=excluded.almoco_fim
   `);
+  // transaction() = tudo-ou-nada: se um dia falhar, desfaz os anteriores.
   const tx = db.transaction((lista) => { for (const d of lista) up.run(d); });
   tx(dias);
   res.json({ ok: true });
 });
 
-// ---- Bloqueios (folgas / feriados / faixas) ----
+// ---- BLOQUEIOS: folgas, feriados e pausas pontuais --------------------------
+
+/** GET /api/admin/bloqueios — últimos 200, do mais recente ao mais antigo. */
 router.get('/bloqueios', (req, res) => {
   res.json(db.prepare('SELECT * FROM bloqueios ORDER BY data DESC LIMIT 200').all());
 });
 
+/**
+ * POST /api/admin/bloqueios — cria um bloqueio.
+ * BODY: { data:'AAAA-MM-DD', hora_inicio?:'HH:MM', hora_fim?:'HH:MM', motivo? }
+ * Sem horas = DIA TODO bloqueado. Com horas = só a FAIXA. Resposta 201 + id.
+ */
 router.post('/bloqueios', (req, res) => {
   const { data, hora_inicio, hora_fim, motivo } = req.body || {};
   if (!data) return res.status(400).json({ erro: 'Informe a data.' });
@@ -92,6 +154,7 @@ router.post('/bloqueios', (req, res) => {
   res.status(201).json({ id: r.lastInsertRowid });
 });
 
+/** DELETE /api/admin/bloqueios/:id — "liberar": apaga o bloqueio. */
 router.delete('/bloqueios/:id', (req, res) => {
   db.prepare('DELETE FROM bloqueios WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
