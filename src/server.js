@@ -50,6 +50,12 @@ app.get('/api/config', (req, res) => {
   res.json({ whatsapp: process.env.BARBER_WHATSAPP || '' });
 });
 
+// Sonda de saúde (health check): usada pelo Render/monitoramentos p/ saber
+// se o app está vivo. Leve de propósito: não toca no banco.
+app.get('/api/health', (req, res) => {
+  res.json({ ok: true, app: 'barbercode', hora: new Date().toISOString() });
+});
+
 // ---- Frontend (arquivos estáticos) ------------------------------------------
 // Serve tudo de public/ direto: / → index.html, /css/*.css, /js/*.js…
 app.use(express.static(path.join(__dirname, '..', 'public')));

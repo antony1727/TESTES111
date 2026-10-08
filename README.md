@@ -215,13 +215,25 @@ curl "http://localhost:3000/api/admin/resumo?data=2026-10-13" -H "Authorization:
 
 ## 🚀 Deploy
 
-### Opção A — Tudo junto no Render (recomendado p/ começar)
+### Opção A — Tudo junto no Render (GRÁTIS, recomendado p/ testar)
 
-1. Suba este projeto no GitHub.
-2. No [Render](https://render.com) → **New → Web Service** → conecte o repositório.
-3. **Build Command:** `npm install` · **Start Command:** `npm start`.
-4. Em **Environment**, adicione: `JWT_SECRET` (valor longo aleatório), `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `BARBER_WHATSAPP`, `JWT_EXPIRES_IN=12h`.
-5. ⚠️ O SQLite mora no disco efêmero: a cada redeploy os dados **apagam**. Soluções: adicione um **Persistent Disk** com `DB_PATH=/data/barbercode.db`, ou migre para Postgres (abaixo).
+Custo: **R$ 0** (plano free, sem cartão) e a URL já sai com o nome: `https://barbercode.onrender.com`.
+
+1. Suba este projeto no GitHub (o `render.yaml` da raiz já configura tudo).
+2. No [Render](https://render.com) → **New → Blueprint** → conecte o repositório `TESTES111` → **Apply**.
+3. Aguarde o build (~2–5 min). Pronto: site em `https://barbercode.onrender.com` e painel em `https://barbercode.onrender.com/admin` (login `admin@barbercode.app` / `admin123`).
+4. ⚠️ Limites do grátis (ok para teste): o serviço **dorme** após ~15 min parado (o 1º acesso acorda em ~1 min) e o **banco zera** a cada redeploy/restart (o seed recria tudo). Quando quiser valer pra valer: disco persistente (`DB_PATH=/data/barbercode.db`) ou Postgres (abaixo).
+
+### Teste instantâneo (sem conta e sem deploy)
+
+Para mostrar no celular em 1 minuto, exponha seu PC com um túnel HTTPS grátis:
+
+```powershell
+npm start
+# em OUTRO terminal:
+npx -y localtunnel --port 3000
+# → recebe uma URL https://....loca.lt temporária com o site no ar
+```
 
 ### Opção B — Frontend separado (Vercel/Netlify) + backend no Render
 
