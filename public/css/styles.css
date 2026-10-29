@@ -113,3 +113,15 @@ label { font-size: 13px; color: var(--muted); display: block; margin: 10px 0 6px
 .diasemana { display: grid; gap: 10px; } /* lista de 7 dias do expediente */
 .dia { display: grid; grid-template-columns: 1fr; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
 @media (min-width: 720px) { .dia { grid-template-columns: 140px 1fr 1fr 1fr 1fr; align-items: center; } } /* linha de 5 colunas no desktop */
+
+/* ---------- 9. Aviso flutuante (tempo real) ---------- */
+/* Aparece no canto superior quando um cliente agenda — some sozinho em 8s. */
+.toast {
+  position: fixed; z-index: 50; left: 50%; top: 16px; transform: translateX(-50%);
+  max-width: min(92vw, 560px); padding: 14px 18px; border-radius: 12px;
+  background: #123d28; border: 1px solid #1f5c3a; color: #c8ffdd;
+  font-weight: 600; font-size: 14px; box-shadow: 0 10px 30px rgba(0,0,0,.5);
+  animation: toastIn .25s ease-out;
+}
+.toast.erro { background: #3d1a1a; border-color: #5c2222; color: #ffb4b4; }
+@keyframes toastIn { from { opacity: 0; transform: translate(-50%, -12px); } to { opacity: 1; transform: translate(-50%, 0); } }

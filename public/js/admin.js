@@ -63,6 +63,7 @@ $('#btnSair').onclick = logout;
  * se NÃO há token, para aqui (tela de login continua visível). Se há:
  * troca as telas, pré-seleciona hoje no filtro, escreve a data por extenso
  * e liga todos os controles (filtros recarregam; botões salvam).
+ * Por fim, abre o canal de TEMPO REAL (SSE).
  */
 async function boot() {
   if (!token()) return; // sem token = fica no login
@@ -74,7 +75,97 @@ async function boot() {
   $('#filtroStatus').onchange = carregarTudo; // trocou o status → refiltra tabela
   $('#btnSalvarFunc').onclick = salvarFunc;
   $('#btnBloquear').onclick = criarBloqueio;
+
+  // Rede de segurança: se a aba voltar ao foco (ex.: celular desbloqueado),
+  // atualiza na hora (o verificador automático cuida do resto).
   await carregarTudo();
+  await definirBase().catch(() => {}); // marca o que já existia (sem avisar)
+  conectarTempoReal();   // ⚡ canal instantâneo (SSE)
+  iniciarVerificador();  // 🔁 confere a cada 5s em qualquer rede
+}
+
+// ============================================================================
+// TEMPO REAL — quando um cliente agenda, o backend avisa por SSE e o painel
+// se atualiza sozinho (sem apertar "Atualizar") + mostra um aviso (toast).
+// ============================================================================
+
+/** Mostra um aviso flutuante no canto da tela por alguns segundos. */
+function toast(mensagem, tipo = 'novo') {
+  const el = $('#toast');
+  if (!el) return;
+  el.className = 'toast ' + tipo; // 'novo' | 'erro'
+  el.textContent = mensagem;
+  el.hidden = false;
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { el.hidden = true; }, 8000);
+}
+
+/**
+ * =====================  VERIFICADOR AUTOMÁTICO  =============================
+ * Dois canais garantem que o painel se atualiza SOZINHO:
+ *   1) SSE (instantâneo) — funciona bem em hospedagem direta (ex.: Render).
+ *   2) Polling a cada 5s — funciona em QUALQUER rede/túnel que bufferize SSE.
+ * Ambos passam por `registrarNovo()`, então o aviso nunca aparece duplicado.
+ * ============================================================================
+ */
+
+let ultimoIdConhecido = 0; // maior id de agendamento já visto por este painel
+let checando = false;      // evita duas verificações simultâneas
+
+/** Trata um agendamento recebido (por SSE ou polling) uma única vez. */
+function registrarNovo(ag) {
+  if (!ag || !ag.id || ag.id <= ultimoIdConhecido) return; // já conhecido
+  ultimoIdConhecido = ag.id;
+  const dataBR = String(ag.data || '').split('-').reverse().join('/');
+  toast(`🔔 Novo agendamento: ${ag.cliente_nome} — ${ag.servico_nome} em ${dataBR} às ${ag.hora} (${ag.profissional_nome})`);
+  carregarTudo().catch(() => {}); // atualiza KPIs + tabela na hora
+}
+
+/** Define a "linha de base" para não avisar sobre agendamentos antigos. */
+async function definirBase() {
+  const lista = await api('/api/admin/ultimos?desde=0');
+  ultimoIdConhecido = lista.reduce((m, a) => Math.max(m, a.id), 0);
+}
+
+/** Abre o canal SSE (instantâneo). Em caso de falha, o polling cobre. */
+function conectarTempoReal() {
+  if (!window.EventSource) return;
+
+  const fonte = new EventSource('/api/admin/eventos?token=' + encodeURIComponent(token()));
+
+  fonte.addEventListener('pronto', () => console.log('[tempo real] conectado'));
+
+  // ⚡ Chegou agendamento novo → avisa e recarrega (se ainda não sabíamos).
+  fonte.addEventListener('novo', (ev) => {
+    let ag; try { ag = JSON.parse(ev.data); } catch { return; }
+    registrarNovo(ag);
+  });
+
+  fonte.onerror = () => {
+    if (!token()) return;
+    // O navegador reconecta sozinho; o polling continua funcionando.
+    console.warn('[tempo real] conexão caiu, tentando reconectar…');
+  };
+}
+
+/** Pergunta ao servidor se há agendamentos novos (funciona em qualquer rede). */
+async function verificarNovos() {
+  if (checando || document.hidden || !token()) return;
+  checando = true;
+  try {
+    const lista = await api('/api/admin/ultimos?desde=' + ultimoIdConhecido);
+    lista.forEach(registrarNovo);
+  } catch { /* rede instável: tenta de novo no próximo ciclo */ }
+  finally { checando = false; }
+}
+
+/** Liga o verificador automático (5s) e reage ao voltar o foco na aba. */
+function iniciarVerificador() {
+  if (iniciarVerificador._t) return;
+  iniciarVerificador._t = setInterval(verificarNovos, 5000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) verificarNovos(); // celular desbloqueado → confere já
+  });
 }
 
 /**

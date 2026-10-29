@@ -17,11 +17,75 @@
  *  DELETE /api/admin/bloqueios/:id                 → libera bloqueio
  */
 const express = require('express');
+const jwt = require('jsonwebtoken'); // valida o token recebido por query (?token=) no SSE
 const db = require('../db');
-const { authObrigatorio } = require('../middleware/auth'); // porteiro JWT
+const { authObrigatorio, SECRET } = require('../middleware/auth'); // porteiro JWT
+const emissor = require('../lib/eventos'); // barramento de eventos (tempo real)
 
 const router = express.Router();
+
+// ============================================================================
+// TEMPO REAL (SSE) — precisa vir ANTES do router.use(authObrigatorio), porque
+// o EventSource do navegador NÃO consegue enviar headers: o token chega pela
+// query string (?token=...). A validação é feita aqui manualmente.
+//
+// GET /api/admin/eventos?token=<JWT>
+//   → mantém a conexão aberta e envia um evento "novo" a cada agendamento.
+// ============================================================================
+router.get('/eventos', (req, res) => {
+  // 1) Autenticação manual (mesmo segredo do middleware).
+  let usuario;
+  try {
+    usuario = jwt.verify(String(req.query.token || ''), SECRET);
+  } catch {
+    return res.status(401).end('Token inválido');
+  }
+
+  // 2) Cabeçalhos de Server-Sent Events: conexão fica aberta e sem buffer.
+  res.set({
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no', // evita buffer em proxies (Render, Nginx, túneis)
+  });
+  res.flushHeaders?.();
+  res.write(`event: pronto\ndata: ${JSON.stringify({ ok: true, usuario: usuario.email })}\n\n`);
+
+  // 3) Cada agendamento novo é enviado como um evento "novo".
+  const aoCriar = (ag) => {
+    res.write(`event: novo\ndata: ${JSON.stringify(ag)}\n\n`);
+  };
+  emissor.on('novo', aoCriar);
+
+  // 4) Comentário periódico (ping) mantém a conexão viva entre proxies.
+  const ping = setInterval(() => res.write(': ping\n\n'), 25000);
+
+  // 5) Limpeza quando o barbeiro fecha a aba/navegador.
+  req.on('close', () => {
+    clearInterval(ping);
+    emissor.off('novo', aoCriar);
+  });
+});
+
 router.use(authObrigatorio); // ← a partir daqui, tudo exige login
+
+/**
+ * GET /api/admin/ultimos?desde=<id> — usado pelo "verificador automático" do
+ * painel (polling). Devolve os agendamentos com id MAIOR que `desde`, de
+ * QUALQUER data (inclusive futuras), para o barbeiro ver na hora o que o
+ * cliente acabou de marcar — mesmo sem SSE (redes/proxies que bufferizam).
+ */
+router.get('/ultimos', (req, res) => {
+  const desde = Number(req.query.desde || 0) || 0;
+  const lista = db.prepare(`
+    SELECT a.*, s.nome AS servico_nome, s.preco_centavos, s.duracao_min, p.nome AS profissional_nome
+    FROM agendamentos a
+    JOIN servicos s ON s.id = a.servico_id
+    JOIN profissionais p ON p.id = a.profissional_id
+    WHERE a.id > ? ORDER BY a.id ASC LIMIT 50
+  `).all(desde);
+  res.json(lista);
+});
 
 /**
  * GET /api/admin/resumo — alimenta os 3 cards "Visão geral".

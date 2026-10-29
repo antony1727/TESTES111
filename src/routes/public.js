@@ -17,6 +17,7 @@
 const express = require('express');
 const db = require('../db'); // consultas diretas às tabelas
 const { horariosVagos } = require('../lib/disponibilidade'); // cérebro da grade
+const emissor = require('../lib/eventos'); // avisa o painel em tempo real
 
 const router = express.Router();
 
@@ -103,6 +104,11 @@ router.post('/agendamentos', (req, res) => {
       FROM agendamentos a JOIN servicos s ON s.id=a.servico_id JOIN profissionais p ON p.id=a.profissional_id
       WHERE a.id = ?
     `).get(r.lastInsertRowid);
+
+    // 7) Avisa o painel do barbeiro EM TEMPO REAL (SSE em routes/admin.js).
+    //    O painel recebe e mostra cliente, serviço, dia e hora sem recarregar.
+    emissor.emit('novo', ag);
+
     res.status(201).json(ag);
   } catch (e) {
     return res.status(409).json({ erro: 'Horário acabou de ser ocupado. Tente outro.' });
