@@ -21,13 +21,16 @@ const { SECRET } = require('../middleware/auth'); // mesmo segredo da validaçã
 
 const router = express.Router();
 
-router.post('/login', (req, res) => {
+// Envolve o handler async e converte exceções em resposta 500 (sem derrubar o app).
+const rota = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+router.post('/login', rota(async (req, res) => {
   // 1) Validação básica: os dois campos são obrigatórios.
   const { email, senha } = req.body || {};
   if (!email || !senha) return res.status(400).json({ erro: 'Informe e-mail e senha.' });
 
   // 2) Busca o usuário pelo e-mail. Se não existir, cai no mesmo erro genérico.
-  const user = db.prepare('SELECT * FROM usuarios WHERE email = ?').get(email);
+  const user = await db.get('SELECT * FROM usuarios WHERE email = ?', [email]);
   if (!user || !bcrypt.compareSync(senha, user.senha_hash)) {
     return res.status(401).json({ erro: 'Credenciais inválidas.' });
   }
@@ -41,6 +44,6 @@ router.post('/login', (req, res) => {
 
   // 4) Devolve token + perfil. O frontend guarda o token no localStorage.
   res.json({ token, usuario: { nome: user.nome, email: user.email, papel: user.papel } });
-});
+}));
 
 module.exports = router;

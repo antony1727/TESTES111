@@ -1,0 +1,24 @@
+# keepalive.yml — mantém o serviço do Render acordado (plano grátis).
+# ----------------------------------------------------------------------------
+# O Render "dorme" um serviço gratuito após ~15 min sem acesso. Este workflow
+# faz um GET em /api/health a cada 5 minutos, mantendo o site sempre de pé.
+# Custo: R$ 0 (GitHub Actions é grátis em repositório público).
+#
+# Obs.: o GitHub pode atrasar alguns minutos o cron; ainda assim é bem menor
+# que os 15 min de inatividade. Se o repositório ficar 60 dias sem commits,
+# o GitHub desativa o agendamento — basta reativar na aba Actions.
+name: keepalive
+
+on:
+  schedule:
+    - cron: '*/5 * * * *' # a cada 5 minutos
+  workflow_dispatch: {} # permite rodar manualmente na aba Actions
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Acordar o Barber Code
+        run: |
+          echo "Pingando https://barbercode.onrender.com/api/health"
+          curl -fsS --max-time 60 https://barbercode.onrender.com/api/health || echo "sem resposta (primeiro start pode demorar ~40s)"

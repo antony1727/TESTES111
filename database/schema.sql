@@ -1,5 +1,5 @@
 -- ============================================================================
--- BARBER CODE — Modelagem do banco de dados (SQLite)
+-- BARBER CODE — Modelagem do banco de dados (PostgreSQL)
 -- ============================================================================
 -- COMO LER ESTE ARQUIVO:
 --   • Cada CREATE TABLE representa uma entidade do negócio.
@@ -20,6 +20,7 @@
 --     arredondamento de ponto flutuante. Ex.: 4500 = R$ 45,00.
 --   • Datas usam TEXTO no formato ISO 'YYYY-MM-DD' e horas 'HH:MM'
 --     (padrão que ordena alfabeticamente = ordena cronologicamente).
+--   • Tudo usa IF NOT EXISTS: rodar a cada boot é seguro e não apaga dados.
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -28,12 +29,12 @@
 -- ele agenda informando só nome + telefone.
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS usuarios (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, -- identificador único (gerado sozinho)
+  id SERIAL PRIMARY KEY,                -- identificador único (gerado sozinho)
   nome TEXT NOT NULL,                   -- nome de exibição ("Administrador")
   email TEXT NOT NULL UNIQUE,           -- login; UNIQUE impede 2 contas iguais
   senha_hash TEXT NOT NULL,             -- NUNCA a senha pura: hash bcrypt (ver src/seed.js)
   papel TEXT NOT NULL DEFAULT 'admin',  -- 'admin' (tudo) | 'barbeiro' (futuro: visão limitada)
-  criado_em TEXT NOT NULL DEFAULT (datetime('now')) -- carimbo de criação (UTC do SQLite)
+  criado_em TIMESTAMPTZ NOT NULL DEFAULT now() -- carimbo de criação (UTC)
 );
 
 -- ----------------------------------------------------------------------------
@@ -43,12 +44,12 @@ CREATE TABLE IF NOT EXISTS usuarios (
 -- (dois barbeiros podem atender no mesmo horário, sem conflito).
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS profissionais (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  nome TEXT NOT NULL,          -- nome completo (exibido no painel)
-  apelido TEXT,                -- nome curto (exibido para o cliente escolher)
-  foto_url TEXT,               -- opcional: caminho/URL da foto (evolução futura)
+  id SERIAL PRIMARY KEY,
+  nome TEXT NOT NULL,              -- nome completo (exibido no painel)
+  apelido TEXT,                    -- nome curto (exibido para o cliente escolher)
+  foto_url TEXT,                   -- opcional: caminho/URL da foto (evolução futura)
   ativo INTEGER NOT NULL DEFAULT 1, -- 1 = aparece no site | 0 = oculto (sem apagar histórico)
-  criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+  criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- ----------------------------------------------------------------------------
@@ -57,13 +58,13 @@ CREATE TABLE IF NOT EXISTS profissionais (
 -- é ela que diz quanto tempo cada agendamento ocupa na grade de horários.
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS servicos (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   nome TEXT NOT NULL,              -- ex.: "Combo Cabelo + Barba"
   descricao TEXT DEFAULT '',       -- texto curto de venda exibido no card
   preco_centavos INTEGER NOT NULL, -- ex.: 7000 = R$ 70,00 (ver BRL() no frontend)
   duracao_min INTEGER NOT NULL,    -- ex.: 30, 50 — bloqueia esse tempo na agenda
   ativo INTEGER NOT NULL DEFAULT 1,-- 1 = à venda | 0 = pausado (mantém histórico)
-  criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+  criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- ----------------------------------------------------------------------------
@@ -75,11 +76,11 @@ CREATE TABLE IF NOT EXISTS servicos (
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS horarios_funcionamento (
   dia_semana INTEGER PRIMARY KEY CHECK (dia_semana BETWEEN 0 AND 6),
-  aberto INTEGER NOT NULL DEFAULT 1, -- 1 = atende neste dia | 0 = fechado (ex.: domingo)
-  abertura TEXT NOT NULL DEFAULT '09:00',   -- hora que começa a atender (HH:MM)
-  fechamento TEXT NOT NULL DEFAULT '19:00', -- hora do ÚLTIMO término possível
-  almoco_inicio TEXT DEFAULT '12:00', -- início da pausa; NULL = sem pausa
-  almoco_fim TEXT DEFAULT '13:00'     -- fim da pausa;    NULL = sem pausa
+  aberto INTEGER NOT NULL DEFAULT 1,         -- 1 = atende | 0 = fechado
+  abertura TEXT NOT NULL DEFAULT '09:00',    -- hora que começa a atender (HH:MM)
+  fechamento TEXT NOT NULL DEFAULT '19:00',  -- hora do ÚLTIMO término possível
+  almoco_inicio TEXT DEFAULT '12:00',        -- início da pausa; NULL = sem pausa
+  almoco_fim TEXT DEFAULT '13:00'            -- fim da pausa;    NULL = sem pausa
 );
 
 -- ----------------------------------------------------------------------------
@@ -91,12 +92,12 @@ CREATE TABLE IF NOT EXISTS horarios_funcionamento (
 -- Criados pelo painel admin (POST /api/admin/bloqueios).
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS bloqueios (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  data TEXT NOT NULL,   -- dia bloqueado, formato 'YYYY-MM-DD'
-  hora_inicio TEXT,     -- NULL = dia todo; senão início da faixa 'HH:MM'
-  hora_fim TEXT,        -- NULL = dia todo; senão fim da faixa 'HH:MM'
+  id SERIAL PRIMARY KEY,
+  data TEXT NOT NULL,     -- dia bloqueado, formato 'YYYY-MM-DD'
+  hora_inicio TEXT,       -- NULL = dia todo; senão início da faixa 'HH:MM'
+  hora_fim TEXT,          -- NULL = dia todo; senão fim da faixa 'HH:MM'
   motivo TEXT DEFAULT '', -- ex.: "Feriado", "Férias do Carlos"
-  criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+  criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- ----------------------------------------------------------------------------
@@ -111,7 +112,7 @@ CREATE TABLE IF NOT EXISTS bloqueios (
 -- no faturamento) | 'cancelado' (ignorado na grade e no faturamento).
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS agendamentos (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   servico_id INTEGER NOT NULL REFERENCES servicos(id),           -- o que será feito
   profissional_id INTEGER NOT NULL REFERENCES profissionais(id), -- quem vai atender
   data TEXT NOT NULL,              -- dia do atendimento 'YYYY-MM-DD'
@@ -121,7 +122,7 @@ CREATE TABLE IF NOT EXISTS agendamentos (
   cliente_email TEXT DEFAULT '',   -- opcional
   status TEXT NOT NULL DEFAULT 'confirmado', -- confirmado | concluido | cancelado
   observacao TEXT DEFAULT '',      -- notas internas (alergia, preferência...)
-  criado_em TEXT NOT NULL DEFAULT (datetime('now')),
+  criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (profissional_id, data, hora) -- camada 1 do antichoque (ver acima)
 );
 

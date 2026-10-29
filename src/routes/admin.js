@@ -1,10 +1,12 @@
 /**
  * routes/admin.js — API privada do painel do barbeiro (EXIGE login JWT).
  * ----------------------------------------------------------------------------
- * PROTEÇÃO: `router.use(authObrigatorio)` no topo aplica o porteiro JWT a
- * TODAS as rotas deste arquivo. Sem token válido → 401 automático.
+ * PROTEÇÃO: `router.use(authObrigatorio)` aplica o porteiro JWT a TODAS as
+ * rotas deste arquivo (exceto o SSE, que valida o token na query string).
  *
  * ROTAS:
+ *  GET    /api/admin/eventos?token=<JWT>           → SSE (tempo real, sem login header)
+ *  GET    /api/admin/ultimos?desde=N               → novos agendamentos (verificador)
  *  GET    /api/admin/resumo?data=AAAA-MM-DD        → KPIs do dia (cards do topo)
  *  GET    /api/admin/agendamentos?data=&status=&profissional_id=
  *                                                  → agenda filtrada (tabela)
@@ -23,6 +25,9 @@ const { authObrigatorio, SECRET } = require('../middleware/auth'); // porteiro J
 const emissor = require('../lib/eventos'); // barramento de eventos (tempo real)
 
 const router = express.Router();
+
+// Envolve um handler async e converte exceções em resposta 500 (sem derrubar o app).
+const rota = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 // ============================================================================
 // TEMPO REAL (SSE) — precisa vir ANTES do router.use(authObrigatorio), porque
@@ -75,17 +80,16 @@ router.use(authObrigatorio); // ← a partir daqui, tudo exige login
  * QUALQUER data (inclusive futuras), para o barbeiro ver na hora o que o
  * cliente acabou de marcar — mesmo sem SSE (redes/proxies que bufferizam).
  */
-router.get('/ultimos', (req, res) => {
+router.get('/ultimos', rota(async (req, res) => {
   const desde = Number(req.query.desde || 0) || 0;
-  const lista = db.prepare(`
+  res.json(await db.all(`
     SELECT a.*, s.nome AS servico_nome, s.preco_centavos, s.duracao_min, p.nome AS profissional_nome
     FROM agendamentos a
     JOIN servicos s ON s.id = a.servico_id
     JOIN profissionais p ON p.id = a.profissional_id
     WHERE a.id > ? ORDER BY a.id ASC LIMIT 50
-  `).all(desde);
-  res.json(lista);
-});
+  `, [desde]));
+}));
 
 /**
  * GET /api/admin/resumo — alimenta os 3 cards "Visão geral".
@@ -93,22 +97,22 @@ router.get('/ultimos', (req, res) => {
  * (soma dos NÃO-cancelados: confirmado conta como receita prevista) e os
  * próximos 5 confirmados futuros + contagem por status.
  */
-router.get('/resumo', (req, res) => {
+router.get('/resumo', rota(async (req, res) => {
   // ?data= opcional; sem ele, usa hoje (ISO YYYY-MM-DD).
   const data = req.query.data || new Date().toISOString().slice(0, 10);
 
   // Busca tudo do dia com JOIN (nomes e preços), ordenado por hora (agenda).
-  const lista = db.prepare(`
+  const lista = await db.all(`
     SELECT a.*, s.nome AS servico_nome, s.preco_centavos, p.nome AS profissional_nome
     FROM agendamentos a
     JOIN servicos s ON s.id = a.servico_id
     JOIN profissionais p ON p.id = a.profissional_id
     WHERE a.data = ? ORDER BY a.hora
-  `).all(data);
+  `, [data]);
 
   // Faturamento estimado: soma preços de tudo que NÃO foi cancelado.
   const validos = lista.filter((a) => a.status !== 'cancelado');
-  const faturamento = validos.reduce((t, a) => t + (a.preco_centavos || 0), 0);
+  const faturamento = validos.reduce((t, a) => t + (Number(a.preco_centavos) || 0), 0);
 
   // "Próximos": confirmados cuja hora ainda não passou (ou dias futuros).
   const agora = new Date().toTimeString().slice(0, 5); // 'HH:MM' atual
@@ -119,7 +123,7 @@ router.get('/resumo', (req, res) => {
     concluido: lista.filter((a) => a.status === 'concluido').length,
     cancelado: lista.filter((a) => a.status === 'cancelado').length,
   }});
-});
+}));
 
 /**
  * GET /api/admin/agendamentos — tabela da agenda com filtros opcionais.
@@ -128,7 +132,7 @@ router.get('/resumo', (req, res) => {
  * preocupar com qual filtro veio primeiro. LIMIT 300 = trava de segurança
  * para a tabela nunca travar o navegador.
  */
-router.get('/agendamentos', (req, res) => {
+router.get('/agendamentos', rota(async (req, res) => {
   const { data, status, profissional_id } = req.query;
   let sql = `
     SELECT a.*, s.nome AS servico_nome, s.preco_centavos, s.duracao_min, p.nome AS profissional_nome
@@ -140,41 +144,41 @@ router.get('/agendamentos', (req, res) => {
   if (status) { sql += ' AND a.status = ?'; params.push(status); }
   if (profissional_id) { sql += ' AND a.profissional_id = ?'; params.push(profissional_id); }
   sql += ' ORDER BY a.data DESC, a.hora ASC LIMIT 300';
-  res.json(db.prepare(sql).all(...params));
-});
+  res.json(await db.all(sql, params));
+}));
 
 /**
  * PATCH /api/admin/agendamentos/:id — troca o status (botões ✓ / ✕ da tabela).
  * BODY: { status: 'confirmado' | 'concluido' | 'cancelado' }.
  * A whitelist abaixo impede valores inventados. 404 se o id não existir.
  */
-router.patch('/agendamentos/:id', (req, res) => {
+router.patch('/agendamentos/:id', rota(async (req, res) => {
   const { status } = req.body || {};
   if (!['confirmado', 'concluido', 'cancelado'].includes(status)) {
     return res.status(400).json({ erro: 'Status inválido.' });
   }
-  const r = db.prepare('UPDATE agendamentos SET status = ? WHERE id = ?').run(status, req.params.id);
+  const r = await db.run('UPDATE agendamentos SET status = ? WHERE id = ?', [status, req.params.id]);
   if (!r.changes) return res.status(404).json({ erro: 'Agendamento não encontrado.' });
   res.json({ ok: true });
-});
+}));
 
 /**
  * DELETE /api/admin/agendamentos/:id — exclusão DEFINITIVA (frontend pede
  * confirmação antes). Para "cancelar sem apagar o histórico", prefira o
  * PATCH com status=cancelado. 404 se o id não existir.
  */
-router.delete('/agendamentos/:id', (req, res) => {
-  const r = db.prepare('DELETE FROM agendamentos WHERE id = ?').run(req.params.id);
+router.delete('/agendamentos/:id', rota(async (req, res) => {
+  const r = await db.run('DELETE FROM agendamentos WHERE id = ?', [req.params.id]);
   if (!r.changes) return res.status(404).json({ erro: 'Agendamento não encontrado.' });
   res.json({ ok: true });
-});
+}));
 
 // ---- EXPEDIENTE SEMANAL (tabela horarios_funcionamento) --------------------
 
 /** GET /api/admin/funcionamento — devolve as 7 linhas (dom=0 … sáb=6). */
-router.get('/funcionamento', (req, res) => {
-  res.json(db.prepare('SELECT * FROM horarios_funcionamento ORDER BY dia_semana').all());
-});
+router.get('/funcionamento', rota(async (req, res) => {
+  res.json(await db.all('SELECT * FROM horarios_funcionamento ORDER BY dia_semana'));
+}));
 
 /**
  * PUT /api/admin/funcionamento — salva o expediente da semana inteira.
@@ -183,45 +187,52 @@ router.get('/funcionamento', (req, res) => {
  * Usa UPSERT (INSERT … ON CONFLICT DO UPDATE) dentro de UMA transação:
  * ou salva os 7 dias, ou não salva nenhum (nunca fica "meio salvo").
  */
-router.put('/funcionamento', (req, res) => {
+router.put('/funcionamento', rota(async (req, res) => {
   const dias = req.body?.dias;
   if (!Array.isArray(dias)) return res.status(400).json({ erro: 'Envie { dias: [...] }.' });
-  const up = db.prepare(`
-    INSERT INTO horarios_funcionamento (dia_semana, aberto, abertura, fechamento, almoco_inicio, almoco_fim)
-    VALUES (@dia_semana, @aberto, @abertura, @fechamento, @almoco_inicio, @almoco_fim)
-    ON CONFLICT(dia_semana) DO UPDATE SET aberto=excluded.aberto, abertura=excluded.abertura,
-      fechamento=excluded.fechamento, almoco_inicio=excluded.almoco_inicio, almoco_fim=excluded.almoco_fim
-  `);
-  // transaction() = tudo-ou-nada: se um dia falhar, desfaz os anteriores.
-  const tx = db.transaction((lista) => { for (const d of lista) up.run(d); });
-  tx(dias);
+  await db.transaction(async (q) => {
+    for (const d of dias) {
+      await q(`
+        INSERT INTO horarios_funcionamento (dia_semana, aberto, abertura, fechamento, almoco_inicio, almoco_fim)
+        VALUES (?,?,?,?,?,?)
+        ON CONFLICT (dia_semana) DO UPDATE SET
+          aberto = EXCLUDED.aberto,
+          abertura = EXCLUDED.abertura,
+          fechamento = EXCLUDED.fechamento,
+          almoco_inicio = EXCLUDED.almoco_inicio,
+          almoco_fim = EXCLUDED.almoco_fim
+      `, [d.dia_semana, d.aberto, d.abertura, d.fechamento, d.almoco_inicio || null, d.almoco_fim || null]);
+    }
+  });
   res.json({ ok: true });
-});
+}));
 
 // ---- BLOQUEIOS: folgas, feriados e pausas pontuais --------------------------
 
 /** GET /api/admin/bloqueios — últimos 200, do mais recente ao mais antigo. */
-router.get('/bloqueios', (req, res) => {
-  res.json(db.prepare('SELECT * FROM bloqueios ORDER BY data DESC LIMIT 200').all());
-});
+router.get('/bloqueios', rota(async (req, res) => {
+  res.json(await db.all('SELECT * FROM bloqueios ORDER BY data DESC LIMIT 200'));
+}));
 
 /**
  * POST /api/admin/bloqueios — cria um bloqueio.
  * BODY: { data:'AAAA-MM-DD', hora_inicio?:'HH:MM', hora_fim?:'HH:MM', motivo? }
  * Sem horas = DIA TODO bloqueado. Com horas = só a FAIXA. Resposta 201 + id.
  */
-router.post('/bloqueios', (req, res) => {
+router.post('/bloqueios', rota(async (req, res) => {
   const { data, hora_inicio, hora_fim, motivo } = req.body || {};
   if (!data) return res.status(400).json({ erro: 'Informe a data.' });
-  const r = db.prepare('INSERT INTO bloqueios (data, hora_inicio, hora_fim, motivo) VALUES (?,?,?,?)')
-    .run(data, hora_inicio || null, hora_fim || null, motivo || '');
-  res.status(201).json({ id: r.lastInsertRowid });
-});
+  const r = await db.get(
+    'INSERT INTO bloqueios (data, hora_inicio, hora_fim, motivo) VALUES (?,?,?,?) RETURNING id',
+    [data, hora_inicio || null, hora_fim || null, motivo || '']
+  );
+  res.status(201).json({ id: r.id });
+}));
 
 /** DELETE /api/admin/bloqueios/:id — "liberar": apaga o bloqueio. */
-router.delete('/bloqueios/:id', (req, res) => {
-  db.prepare('DELETE FROM bloqueios WHERE id = ?').run(req.params.id);
+router.delete('/bloqueios/:id', rota(async (req, res) => {
+  await db.run('DELETE FROM bloqueios WHERE id = ?', [req.params.id]);
   res.json({ ok: true });
-});
+}));
 
 module.exports = router;

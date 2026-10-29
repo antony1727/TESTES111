@@ -8,15 +8,16 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "seed": "node src/seed.js",
-    "init-db": "node -e \"require('./src/db.js'); console.log('DB ok')\""
+    "init-db": "node -e \"require('./src/db.js').init().then(()=>console.log('DB ok'))\""
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.5.13",
     "bcryptjs": "^2.4.3",
-    "better-sqlite3": "^11.10.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.23.1"
   },
   "engines": {
     "node": ">=18"

@@ -15,28 +15,31 @@
  *     (2 cliques simultâneos): o 2º INSERT falha e vira 409 amigável.
  */
 const express = require('express');
-const db = require('../db'); // consultas diretas às tabelas
+const db = require('../db'); // consultas (async) às tabelas
 const { horariosVagos } = require('../lib/disponibilidade'); // cérebro da grade
 const emissor = require('../lib/eventos'); // avisa o painel em tempo real
 
 const router = express.Router();
+
+// Envolve um handler async e converte exceções em resposta 500 (sem derrubar o app).
+const rota = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 /**
  * GET /api/servicos — lista serviços ativos ordenados do mais barato ao
  * mais caro (ordem que converte bem na vitrine). Usado 2×: cards da landing
  * e opções clicáveis do Passo 1.
  */
-router.get('/servicos', (req, res) => {
-  res.json(db.prepare('SELECT * FROM servicos WHERE ativo = 1 ORDER BY preco_centavos').all());
-});
+router.get('/servicos', rota(async (req, res) => {
+  res.json(await db.all('SELECT * FROM servicos WHERE ativo = 1 ORDER BY preco_centavos'));
+}));
 
 /**
  * GET /api/profissionais — lista barbeiros ativos em ordem alfabética
  * para o Passo 2 ("com quem você quer ser atendido?").
  */
-router.get('/profissionais', (req, res) => {
-  res.json(db.prepare('SELECT * FROM profissionais WHERE ativo = 1 ORDER BY nome').all());
-});
+router.get('/profissionais', rota(async (req, res) => {
+  res.json(await db.all('SELECT * FROM profissionais WHERE ativo = 1 ORDER BY nome'));
+}));
 
 /**
  * GET /api/disponibilidade — coração do Passo 3.
@@ -44,17 +47,17 @@ router.get('/profissionais', (req, res) => {
  * serviço muda o resultado: combo de 50min tem menos slots que corte de 30).
  * Resposta: { data, horarios: ['09:00', '09:30', ...] }.
  */
-router.get('/disponibilidade', (req, res) => {
+router.get('/disponibilidade', rota(async (req, res) => {
   const { data, profissional_id, servico_id } = req.query;
   // Valida presença dos 3 parâmetros antes de qualquer consulta.
   if (!data || !profissional_id || !servico_id) {
     return res.status(400).json({ erro: 'Informe data, profissional_id e servico_id.' });
   }
   // Precisamos da duração do serviço para calcular os slots.
-  const serv = db.prepare('SELECT * FROM servicos WHERE id = ?').get(servico_id);
+  const serv = await db.get('SELECT * FROM servicos WHERE id = ?', [servico_id]);
   if (!serv) return res.status(404).json({ erro: 'Serviço não encontrado.' });
-  res.json({ data, horarios: horariosVagos(data, Number(profissional_id), serv.duracao_min) });
-});
+  res.json({ data, horarios: await horariosVagos(data, Number(profissional_id), serv.duracao_min) });
+}));
 
 /**
  * POST /api/agendamentos — cria a reserva (botão "Confirmar agendamento").
@@ -66,7 +69,7 @@ router.get('/disponibilidade', (req, res) => {
  *   inativo) | 409 (horário ocupado — devolve a grade atualizada p/ o cliente
  *   escolher outro sem precisar recarregar a página).
  */
-router.post('/agendamentos', (req, res) => {
+router.post('/agendamentos', rota(async (req, res) => {
   const { servico_id, profissional_id, data, hora, cliente_nome, cliente_telefone, cliente_email } = req.body || {};
 
   // 1) Campos obrigatórios: sem eles nem consultamos o banco.
@@ -79,40 +82,46 @@ router.post('/agendamentos', (req, res) => {
   }
   // 3) Serviço/profissional precisam existir E estar ativos (não some com
   //    item pausado só mudando o id no DevTools).
-  const serv = db.prepare('SELECT * FROM servicos WHERE id = ? AND ativo = 1').get(servico_id);
-  const prof = db.prepare('SELECT * FROM profissionais WHERE id = ? AND ativo = 1').get(profissional_id);
+  const serv = await db.get('SELECT * FROM servicos WHERE id = ? AND ativo = 1', [servico_id]);
+  const prof = await db.get('SELECT * FROM profissionais WHERE id = ? AND ativo = 1', [profissional_id]);
   if (!serv || !prof) return res.status(404).json({ erro: 'Serviço ou profissional inválido.' });
 
   // 4) Revalidação antichoque: o slot ainda está livre AGORA? Se outro cliente
   //    reservou segundos atrás, recusamos com 409 + grade fresca.
-  const livres = horariosVagos(data, Number(profissional_id), serv.duracao_min);
+  const livres = await horariosVagos(data, Number(profissional_id), serv.duracao_min);
   if (!livres.includes(hora)) {
     return res.status(409).json({ erro: 'Horário indisponível. Escolha outro.', horarios: livres });
   }
 
   // 5) Tudo certo: insere. O try/catch cobre a 2ª camada antichoque (UNIQUE):
   //    se 2 INSERTs idênticos colidirem, o perdedor cai aqui com 409 amigável.
+  let criado;
   try {
-    const r = db.prepare(`
+    criado = await db.get(`
       INSERT INTO agendamentos (servico_id, profissional_id, data, hora, cliente_nome, cliente_telefone, cliente_email)
       VALUES (?,?,?,?,?,?,?)
-    `).run(servico_id, profissional_id, data, hora, cliente_nome.trim(), cliente_telefone.trim(), (cliente_email || '').trim());
-
-    // 6) Releitura com JOIN para devolver nomes/preço/duração (frontend exibe).
-    const ag = db.prepare(`
-      SELECT a.*, s.nome AS servico_nome, s.preco_centavos, s.duracao_min, p.nome AS profissional_nome
-      FROM agendamentos a JOIN servicos s ON s.id=a.servico_id JOIN profissionais p ON p.id=a.profissional_id
-      WHERE a.id = ?
-    `).get(r.lastInsertRowid);
-
-    // 7) Avisa o painel do barbeiro EM TEMPO REAL (SSE em routes/admin.js).
-    //    O painel recebe e mostra cliente, serviço, dia e hora sem recarregar.
-    emissor.emit('novo', ag);
-
-    res.status(201).json(ag);
+      RETURNING id
+    `, [servico_id, profissional_id, data, hora, cliente_nome.trim(), cliente_telefone.trim(), (cliente_email || '').trim()]);
   } catch (e) {
-    return res.status(409).json({ erro: 'Horário acabou de ser ocupado. Tente outro.' });
+    // 23505 = unique_violation (Postgres): alguém pegou o horário no meio do caminho.
+    if (e.code === '23505') {
+      return res.status(409).json({ erro: 'Horário acabou de ser ocupado. Tente outro.' });
+    }
+    throw e; // erro inesperado → 500 (o handler genérico loga)
   }
-});
+
+  // 6) Releitura com JOIN para devolver nomes/preço/duração (frontend exibe).
+  const ag = await db.get(`
+    SELECT a.*, s.nome AS servico_nome, s.preco_centavos, s.duracao_min, p.nome AS profissional_nome
+    FROM agendamentos a JOIN servicos s ON s.id=a.servico_id JOIN profissionais p ON p.id=a.profissional_id
+    WHERE a.id = ?
+  `, [criado.id]);
+
+  // 7) Avisa o painel do barbeiro EM TEMPO REAL (SSE em routes/admin.js).
+  //    O painel recebe e mostra cliente, serviço, dia e hora sem recarregar.
+  emissor.emit('novo', ag);
+
+  res.status(201).json(ag);
+}));
 
 module.exports = router;

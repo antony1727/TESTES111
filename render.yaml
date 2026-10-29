@@ -1,27 +1,31 @@
 # render.yaml — Blueprint para deploy GRATUITO no Render (sem cartão).
 # ----------------------------------------------------------------------------
-# COMO USAR (2 minutos, grátis):
-#  1. Suba este repositório no GitHub (já está: TESTES111).
-#  2. Acesse https://dashboard.render.com → New → Blueprint → selecione o repo.
-#  3. O Render lê este arquivo e cria o serviço "barbercode" no plano FREE.
-#  4. Resultado: site público em https://barbercode.onrender.com (com o nome!).
+# COMO USAR (5 minutos, grátis e SEM perder agendamentos):
+#  1. Crie o banco grátis no Neon (https://neon.tech) e copie a connection string.
+#  2. Abra https://render.com/deploy?repo=https://github.com/antony1727/TESTES111
+#  3. Dê "Apply" e, quando pedir DATABASE_URL, cole a string do Neon.
+#  4. Resultado: https://barbercode.onrender.com (com o nome!) + /admin
 #
-# NOTAS DO PLANO GRÁTIS (só para TESTE — é o que você quer agora):
-#  • O serviço "dorme" após ~15 min sem acesso; o 1º clique demora ~1 min p/ acordar.
-#  • O disco é EFÊMERO: a cada redeploy/restart o banco SQLite zera e o seed
-#    recria tudo (admin + serviços de exemplo). Para teste está ótimo.
-#  • 750h/mês grátis = suficiente para 1 serviço ligado o mês todo.
+# POR QUE NEON? O disco do plano free do Render é TEMPORÁRIO (os agendamentos
+# seriam apagados a cada restart). Com o Postgres do Neon (também grátis) os
+# dados ficam guardados de verdade. O keepalive.yml impede o serviço de dormir.
 # ----------------------------------------------------------------------------
 services:
   # Serviço web único: backend (API) + frontend (arquivos public/) juntos.
   - type: web
-    name: barbercode # ← este nome vira a URL: https://barbercode.onrender.com
+    name: barbercode # → este nome vira a URL: https://barbercode.onrender.com
     runtime: node
-    plan: free # ← plano 100% grátis
+    plan: free # → plano 100% grátis
     buildCommand: npm install # instala as dependências
     startCommand: npm start # sobe o Express (usa a PORT que o Render injeta)
     healthCheckPath: /api/health # sonda que prova que o app está vivo
     envVars:
+      # Postgres hospedado (Neon). O Render pergunta o valor no primeiro deploy.
+      - key: DATABASE_URL
+        sync: false
+      # Em produção o app exige DATABASE_URL (não sobe com banco temporário).
+      - key: NODE_ENV
+        value: production
       # Segredo do JWT gerado automaticamente pelo Render (não se preocupe).
       - key: JWT_SECRET
         generateValue: true

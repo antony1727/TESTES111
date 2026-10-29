@@ -9,7 +9,7 @@ Plataforma web completa (mobile-first, tema dark premium) com duas áreas:
 | **Cliente (pública)** | `/` | Vitrine de serviços + agendamento guiado em **5 passos** (serviço → profissional → data/hora → dados → confirmação com WhatsApp e `.ics`) |
 | **Barbeiro/Admin (privada)** | `/admin` | Login JWT, **KPIs do dia** (clientes, faturamento estimado, próximo horário), **agenda com filtros e troca de status**, **expediente semanal** e **bloqueios** (folgas/feriados) |
 
-> **Status:** funcional de ponta a ponta, sem build no frontend e sem banco externo (SQLite em arquivo). Pronto para rodar local e evoluir para Postgres/Supabase + notificações automáticas.
+> **Status:** funcional de ponta a ponta, sem build no frontend. Banco **PostgreSQL** (Neon grátis em produção; PGlite local para desenvolvimento) — **os agendamentos não se perdem** em restart/deploy. Painel com **atualização automática** dos agendamentos (SSE + verificador a cada 5s).
 
 ---
 
@@ -37,7 +37,7 @@ Plataforma web completa (mobile-first, tema dark premium) com duas áreas:
 | Frontend | **HTML + CSS + JS puro** (sem framework/build) | Zero compilação: qualquer hospedagem estática serve; fácil de ler e personalizar |
 | Estilo | **CSS próprio** (`public/css/styles.css`) | Tema dark dourado mobile-first, sem dependência de CDN |
 | Backend | **Node.js + Express** (`src/`) | API JSON simples + serve o próprio frontend (monolito barato de hospedar) |
-| Banco | **SQLite** via `better-sqlite3` | Arquivo único, zero-config; consultas síncronas simples; migra fácil p/ Postgres depois |
+| Banco | **PostgreSQL** (`pg` em produção / `@electric-sql/pglite` local) | Dados persistentes em hospedagem grátis; em dev roda Postgres real em WASM, sem instalar nada |
 | Auth | **JWT** (`jsonwebtoken`) + **bcryptjs** | Login sem sessão no servidor; senha só existe como hash |
 | Utilidades | `cors`, `dotenv` | CORS p/ frontend separado; config via `.env` |
 
@@ -53,10 +53,11 @@ PROJETO-TESTE/
 │   └── schema.sql            # Modelagem: 6 tabelas + índices (TODO comentado no arquivo)
 ├── src/                      # BACKEND (Node + Express)
 │   ├── server.js             # Entrada: dotenv → db → seed → rotas → estáticos → listen
-│   ├── db.js                 # Abre/cria barbercode.db e aplica o schema (singleton)
+│   ├── db.js                 # Postgres: `pg` (DATABASE_URL) ou PGlite local (.data/)
 │   ├── seed.js               # Carga inicial idempotente (admin, barbeiros, serviços, Ter–Sáb)
 │   ├── lib/
-│   │   └── disponibilidade.js# ⭐ Cérebro da grade: calcula horários livres (6 regras)
+│   │   ├── disponibilidade.js# ⭐ Cérebro da grade: calcula horários livres (6 regras)
+│   │   └── eventos.js        # Barramento em memória p/ avisar o painel (tempo real)
 │   ├── middleware/
 │   │   └── auth.js           # Porteiro JWT das rotas /api/admin/*
 │   └── routes/
@@ -71,9 +72,10 @@ PROJETO-TESTE/
 │       ├── booking.js        # Lógica do wizard do cliente
 │       └── admin.js          # Lógica do painel (token no localStorage)
 ├── package.json              # Scripts: start | dev (watch) | seed | init-db
-├── package-lock.json          # Versões exatas das dependências
+├── package-lock.json         # Versões exatas das dependências
 ├── .env.example              # Modelo comentado → copiar para .env
-├── .gitignore                # node_modules/, *.db, .env fora do git
+├── .gitignore                # node_modules/, .env, .data/ fora do git
+├── .github/workflows/        # keepalive.yml: pinga o Render p/ não dormir
 └── README.md                 # Este arquivo
 ```
 
@@ -113,7 +115,10 @@ Toda chamada /api/admin/* leva "Authorization: Bearer <token>" ─► authObriga
 
 ## 🗄️ Banco de dados (modelagem)
 
-Arquivo: `database/schema.sql` (aplicado automaticamente a cada boot via `src/db.js`).
+Arquivo: `database/schema.sql` (**PostgreSQL**, aplicado automaticamente a cada boot via `src/db.js`).
+
+- **Produção:** variável `DATABASE_URL` (Neon/Supabase/Render Postgres). Dados persistentes.
+- **Local:** sem `DATABASE_URL`, usa o **PGlite** (Postgres em WASM) gravando em `.data/pglite` — não precisa instalar Postgres.
 
 ```text
 usuarios ─── (login do painel; cliente NÃO tem conta)
@@ -160,6 +165,8 @@ Erros do POST: `400` (campo/formato), `404` (serviço/profissional inválido ou 
 | Método | Rota | Uso |
 |---|---|---|
 | POST | `/api/auth/login` | `{email, senha}` → `{token, usuario}` |
+| GET | `/api/admin/eventos?token=<JWT>` | **SSE**: eventos `pronto` e `novo` (agendamento em tempo real) |
+| GET | `/api/admin/ultimos?desde=N` | Agendamentos com `id > N`, de qualquer data (verificador de 5s) |
 | GET | `/api/admin/resumo?data=` | `{total, faturamento_centavos, proximos[5], por_status}` |
 | GET | `/api/admin/agendamentos?data=&status=&profissional_id=` | Agenda filtrada (máx. 300) |
 | PATCH | `/api/admin/agendamentos/:id` | `{status: confirmado\|concluido\|cancelado}` |
@@ -191,6 +198,10 @@ npm start
 
 **Login do painel (dados do seed):** `admin@barbercode.app` / `admin123` — troque no `.env` antes de expor na internet.
 
+> **Banco local:** sem `DATABASE_URL` no `.env`, o app usa o **PGlite** e grava em `.data/pglite` (Postgres real, sem instalar nada). Para apagar e recomeçar, exclua a pasta `.data/`.
+
+> **Tempo real:** deixe o painel aberto em `/admin` e agende pelo site em outra aba — o agendamento aparece sozinho, com o aviso “🔔 Novo agendamento”.
+
 ---
 
 ## 🧪 Testando na mão (cURL)
@@ -215,14 +226,24 @@ curl "http://localhost:3000/api/admin/resumo?data=2026-10-13" -H "Authorization:
 
 ## 🚀 Deploy
 
-### Opção A — Tudo junto no Render (GRÁTIS, recomendado p/ testar)
+### Opção A — Render + Neon (os dois GRÁTIS) — recomendado
 
-Custo: **R$ 0** (plano free, sem cartão) e a URL já sai com o nome: `https://barbercode.onrender.com`.
+Custo: **R$ 0**. URL fixa: `https://barbercode.onrender.com`. Os agendamentos ficam no Neon, então **não se perdem** em restart/redeploy.
 
-1. Suba este projeto no GitHub (o `render.yaml` da raiz já configura tudo).
-2. No [Render](https://render.com) → **New → Blueprint** → conecte o repositório `TESTES111` → **Apply**.
-3. Aguarde o build (~2–5 min). Pronto: site em `https://barbercode.onrender.com` e painel em `https://barbercode.onrender.com/admin` (login `admin@barbercode.app` / `admin123`).
-4. ⚠️ Limites do grátis (ok para teste): o serviço **dorme** após ~15 min parado (o 1º acesso acorda em ~1 min) e o **banco zera** a cada redeploy/restart (o seed recria tudo). Quando quiser valer pra valer: disco persistente (`DB_PATH=/data/barbercode.db`) ou Postgres (abaixo).
+**Passo 1 — banco (Neon, ~2 min):**
+1. Acesse [neon.tech](https://neon.tech) → **Sign up with GitHub** (sem cartão).
+2. **Create project** (região `AWS us-east-1` ou a mais próxima).
+3. Copie a **Connection string** (`postgresql://user:senha@host/db?sslmode=require`).
+
+**Passo 2 — deploy (Render, ~3 min):**
+1. Abra https://render.com/deploy?repo=https://github.com/antony1727/TESTES111 (login com GitHub).
+2. Dê **Apply**. O `render.yaml` cria o serviço `barbercode` no plano FREE.
+3. Quando o Render pedir a variável `DATABASE_URL`, **cole a connection string do Neon** e confirme.
+
+**Passo 3 — manter sempre acordado (grátis):**
+- O workflow `.github/workflows/keepalive.yml` faz um ping em `/api/health` a cada 5 minutos via GitHub Actions (grátis em repositório público), evitando que o Render "durma".
+
+> Limites do grátis: Render 750h/mês (suficiente para 1 serviço 24/7) e Neon 0,5 GB (milhões de agendamentos). Para SLA garantido, os planos pagos começam em ~US$7/mês.
 
 ### Teste instantâneo (sem conta e sem deploy)
 
@@ -254,11 +275,17 @@ PAINEL: https://<aleatorio>.trycloudflare.com/admin
 3. **Tudo junto no Render:** Service → Settings → Custom Domains → Add `barbercode.app` → crie o registro `CNAME` apontando para o endereço `.onrender.com` do serviço.
 4. O HTML já sai com `<link rel="canonical">` + tags `og:*` apontando para `https://barbercode.app/` — se usar outro domínio, atualize essas linhas no `<head>` de `public/index.html`.
 
-### Migrando para Postgres/Supabase (quando crescer)
+### Banco de produção (Neon) — backup e detalhes
 
-- Troque `better-sqlite3` por `pg` (ou Prisma), convertendo `db.prepare(...).get/all/run` para queries parametrizadas `$1, $2…`.
-- As **rotas não mudam de formato** — só a camada `src/db.js` + SQL do seed.
-- Para **tempo real** (agenda atualizando sozinha), avalie Supabase Realtime ou Firebase; o cálculo de `disponibilidade.js` continua válido no servidor.
+- O schema é aplicado sozinho no boot (`CREATE TABLE IF NOT EXISTS`) e o seed é idempotente: reiniciar **não apaga nem duplica** nada.
+- Para **backup**, no painel do Neon use **Branches → Create branch** (cópia instantânea) ou `pg_dump "$DATABASE_URL" > backup.sql`.
+- Trocou de banco? Basta atualizar `DATABASE_URL` no Render e dar **Manual Deploy**.
+
+### Tempo real (agenda atualizando sozinha)
+
+- `POST /api/agendamentos` dispara `emissor.emit('novo', ag)` (`src/lib/eventos.js`).
+- O painel escuta por **SSE** (`GET /api/admin/eventos?token=…`) e, como reserva, consulta `GET /api/admin/ultimos?desde=<id>` a cada **5s** — funciona mesmo atrás de proxies que bufferizam o SSE.
+- Ao chegar reserva nova: aviso flutuante (“🔔 Novo agendamento…”) + KPIs/agenda atualizados sem recarregar a página.
 
 ### Notificações automáticas (WhatsApp / Google Calendar)
 
@@ -276,7 +303,8 @@ PAINEL: https://<aleatorio>.trycloudflare.com/admin
 | `JWT_EXPIRES_IN` | não | `12h` | Validade do login (`30m`, `12h`, `7d`…) |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | não | `admin@barbercode.app` / `admin123` | Conta criada pelo seed |
 | `BARBER_WHATSAPP` | não | `""` | DDI+DDD+número p/ o botão de WhatsApp |
-| `DB_PATH` | não | `./barbercode.db` | Onde fica o arquivo SQLite |
+| `DATABASE_URL` | **sim (produção)** | — | Postgres (Neon). Sem ela, usa PGlite local |
+| `NODE_ENV` | não | — | `production` exige `DATABASE_URL` (evita subir sem banco persistente) |
 
 Gere um segredo forte assim: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
 
@@ -287,7 +315,7 @@ Gere um segredo forte assim: `node -e "console.log(require('crypto').randomBytes
 - ✅ Senhas só como **hash bcrypt**; erro de login **genérico** (não revela se o e-mail existe).
 - ✅ Rotas admin atrás de **JWT com expiração**; SQL sempre **parametrizado** (sem concatenação → sem SQL injection).
 - ⚠️ **Antes de publicar:** `JWT_SECRET` forte, trocar senha do admin, servir via **HTTPS**, considerar rate-limit no `/login` (ex.: `express-rate-limit`) e remover as credenciais de demonstração dos `value=` em `admin.html`.
-- ⚠️ `.env` e `*.db` **nunca** entram no git (ver `.gitignore`).
+- ⚠️ `.env` e a pasta `.data/` (banco local) **nunca** entram no git (ver `.gitignore`).
 
 ---
 
@@ -297,8 +325,8 @@ Gere um segredo forte assim: `node -e "console.log(require('crypto').randomBytes
 |---|---|---|
 | `Sem horários vagos` todo dia | Dia fechado no expediente (Dom/Seg padrão) ou bloqueio dia-todo | `/admin` → Configurações → confira expediente e bloqueios |
 | `Token ausente / Sessão expirada` | Sem login ou JWT expirou / `JWT_SECRET` mudou | Faça login de novo (trocar o secret invalida tokens antigos) |
-| `SQLITE_CANTOPEN` / `database is locked` | Pasta sem permissão ou 2 processos no mesmo `.db` | Rode 1 instância; confira permissão de escrita; WAL já está ligado |
-| `better-sqlite3` falha no `npm install` | Falta toolchain de compilação | Node 18+ normalmente usa binário pré-compilado; atualize o Node e tente de novo |
+| `[boot] falha ao iniciar` + erro de conexão | `DATABASE_URL` errada/instável ou Neon pausado | Confira a string (com `sslmode=require`); no Neon a 1ª consulta acorda o banco em ~1s |
+| Painel não atualiza sozinho | Aba em segundo plano ou rede bloqueando SSE | O verificador de 5s cobre; volte o foco na aba e ele confere na hora |
 | Porta ocupada (`EADDRINUSE`) | Outro `npm start` rodando | Feche o outro terminal ou use `PORT=3001 npm start` |
 | Push pede senha e falha | GitHub não aceita senha no HTTPS | Use **Personal Access Token** como senha ou SSH |
 

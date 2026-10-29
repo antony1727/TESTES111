@@ -1,48 +1,152 @@
 /**
- * db.js — Camada de acesso ao banco de dados.
+ * db.js — Camada de acesso ao banco (PostgreSQL).
  * ----------------------------------------------------------------------------
- * RESPONSABILIDADE: abrir (ou criar) o arquivo SQLite e garantir que todas
- * as tabelas existam, aplicando o schema de `database/schema.sql`.
+ * POR QUE POSTGRES? O SQLite em disco não serve no plano grátis do Render:
+ * o disco é temporário e os agendamentos se perderiam a cada restart/deploy.
+ * Um Postgres hospedado (Neon, grátis) guarda os dados de verdade.
  *
- * COMO FUNCIONA:
- *  1. `better-sqlite3` abre o arquivo `barbercode.db` na raiz do projeto.
- *     Se o arquivo não existir, ele é CRIADO vazio automaticamente.
- *  2. Lemos o `schema.sql` e executamos com `db.exec()`. Como todo
- *     CREATE usa `IF NOT EXISTS`, rodar de novo é SEGURO (idempotente):
- *     tabelas já criadas são simplesmente ignoradas.
- *  3. Exportamos a instância `db` (singleton): todos os arquivos que fazem
- *     `require('./db')` compartilham a MESMA conexão. O better-sqlite3 é
- *     síncrono, então não há callbacks/promises aqui — `db.prepare().get()`
- *     retorna o resultado direto.
+ * DOIS MODOS, MESMO CÓDIGO:
+ *  • PRODUÇÃO — define a variável DATABASE_URL (string do Neon). Usa o driver
+ *    `pg` com um pool de conexões.
+ *  • DESENVOLVIMENTO/TESTE — sem DATABASE_URL, usa o PGlite: PostgreSQL real
+ *    compilado para WebAssembly, rodando dentro do Node e gravando em
+ *    `.data/pglite`. Assim você testa sem instalar Postgres nenhum.
  *
- * CONFIGURAÇÃO:
- *  • DB_PATH pode ser sobrescrito pela variável de ambiente DB_PATH
- *    (útil em deploy com disco persistente).
- *  • `journal_mode = WAL` = modo de escrita mais rápido e seguro contra
- *    travamentos quando há leituras e escritas ao mesmo tempo.
- *  • `foreign_keys = ON` = o SQLite passa a respeitar os REFERENCES
- *    declarados no schema (por padrão ele ignoraria).
+ * API EXPORTADA (tudo async, placeholders `?` — a conversão p/ `$1` é feita aqui):
+ *  • init()                 → aplica o schema (idempotente)
+ *  • all(sql, params)       → array de linhas
+ *  • get(sql, params)       → primeira linha (ou undefined)
+ *  • run(sql, params)       → { changes } (linhas afetadas)
+ *  • transaction(async (q) => …) → tudo-ou-nada; `q` é a consulta na transação
+ *  • fechar()               → encerra a conexão (usado em testes)
  */
-const fs = require('fs'); // para ler o arquivo schema.sql do disco
-const path = require('path'); // para montar caminhos que funcionam em qualquer SO
-const Database = require('better-sqlite3'); // driver SQLite síncrono e rápido
+const fs = require('fs');
+const path = require('path');
 
-// Caminho do arquivo do banco. Ex.: .../PROJETO-TESTE/barbercode.db
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'barbercode.db');
-// Caminho do script SQL com todas as tabelas.
+require('dotenv').config(); // carrega DATABASE_URL/PGLITE_DIR do .env
+
 const SCHEMA_PATH = path.join(__dirname, '..', 'database', 'schema.sql');
+const DATABASE_URL = process.env.DATABASE_URL || '';
 
-// Abre (ou cria) o banco. A partir daqui a conexão fica aberta até o node sair.
-const db = new Database(DB_PATH);
-// WAL = melhor desempenho e menos "database is locked" sob concorrência leve.
-db.pragma('journal_mode = WAL');
-// Liga a checagem de chaves estrangeiras (REFERENCES do schema).
-db.pragma('foreign_keys = ON');
+let modo;   // 'pg' (produção) | 'pglite' (local)
+let pool;   // pool do driver pg
+let pglite; // instância local do PGlite
+let iniciado = false;
 
-// Lê o schema.sql como texto e executa todas as instruções de uma vez.
-// Idempotente: pode rodar a cada boot sem duplicar nada.
-const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
-db.exec(schema);
+if (DATABASE_URL) {
+  // ---------- PRODUÇÃO: Postgres hospedado (Neon/Supabase/Render) ----------
+  const { Pool } = require('pg');
+  pool = new Pool({
+    connectionString: DATABASE_URL,
+    max: 5, // poucas conexões bastam para uma barbearia
+    idleTimeoutMillis: 30000,
+    // Neon/Supabase exigem TLS. A própria URL normalmente já traz sslmode=require.
+    ssl: /sslmode=require/.test(DATABASE_URL) ? { rejectUnauthorized: false } : undefined,
+  });
+  modo = 'pg';
+} else {
+  // ---------- LOCAL: PGlite (Postgres em WASM, sem instalar nada) ----------
+  const { PGlite } = require('@electric-sql/pglite');
+  const dir = process.env.PGLITE_DIR || path.join(__dirname, '..', '.data', 'pglite');
+  fs.mkdirSync(dir, { recursive: true }); // garante que a pasta exista antes de abrir
+  pglite = new PGlite(dir);
+  modo = 'pglite';
+}
 
-// Exporta a conexão única para o resto do backend usar.
-module.exports = db;
+/** Troca `?` por `$1, $2, …` (sintaxe de parâmetros do Postgres). */
+function paraPostgres(sql) {
+  let i = 0;
+  return sql.replace(/\?/g, () => '$' + ++i);
+}
+
+/** Executa uma consulta e devolve { rows, rowCount } nos dois modos. */
+async function consultar(sql, params = []) {
+  const text = paraPostgres(sql);
+  if (modo === 'pg') {
+    const r = await pool.query(text, params);
+    return { rows: r.rows, rowCount: r.rowCount };
+  }
+  const r = await pglite.query(text, params);
+  return { rows: r.rows, rowCount: r.affectedRows ?? r.rows.length };
+}
+
+/**
+ * Aplica o schema. Todo CREATE usa IF NOT EXISTS, então rodar a cada boot é
+ * seguro e NÃO apaga dados existentes.
+ */
+async function init() {
+  if (iniciado) return;
+  // Trava de segurança: em produção NÃO aceitamos PGlite (disco temporário no
+  // Render apagaria os agendamentos). Sem DATABASE_URL, falha alto e claro.
+  if (process.env.NODE_ENV === 'production' && modo !== 'pg') {
+    throw new Error('[db] DATABASE_URL não configurada. Em produção use um Postgres (Neon grátis).');
+  }
+  const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
+  if (modo === 'pg') await pool.query(schema); // multi-statement aceito pelo pg
+  else await pglite.exec(schema);              // PGlite tem exec() multi-statement
+  iniciado = true;
+  console.log(`[db] pronto (${modo}${modo === 'pglite' ? ', local' : ', remoto'})`);
+}
+
+/** Todas as linhas de uma consulta. */
+async function all(sql, params = []) {
+  return (await consultar(sql, params)).rows;
+}
+
+/** Primeira linha (ou undefined se não houver resultado). */
+async function get(sql, params = []) {
+  return (await consultar(sql, params)).rows[0];
+}
+
+/** Executa uma escrita e devolve quantas linhas mudaram. */
+async function run(sql, params = []) {
+  return { changes: (await consultar(sql, params)).rowCount };
+}
+
+/**
+ * Roda várias escritas em uma transação (tudo-ou-nada).
+ * Uso:  await transaction(async (q) => { await q(sqlA, [1]); await q(sqlB, [2]); });
+ */
+async function transaction(fn) {
+  if (modo === 'pg') {
+    const cliente = await pool.connect();
+    try {
+      await cliente.query('BEGIN');
+      const q = async (sql, params = []) => {
+        const r = await cliente.query(paraPostgres(sql), params);
+        return { rows: r.rows, rowCount: r.rowCount };
+      };
+      const resultado = await fn(q);
+      await cliente.query('COMMIT');
+      return resultado;
+    } catch (erro) {
+      await cliente.query('ROLLBACK');
+      throw erro;
+    } finally {
+      cliente.release();
+    }
+  }
+
+  // PGlite: a instância é única, então BEGIN/COMMIT funcionam direto.
+  await pglite.query('BEGIN');
+  try {
+    const q = async (sql, params = []) => {
+      const r = await pglite.query(paraPostgres(sql), params);
+      return { rows: r.rows, rowCount: r.affectedRows ?? r.rows.length };
+    };
+    const resultado = await fn(q);
+    await pglite.query('COMMIT');
+    return resultado;
+  } catch (erro) {
+    await pglite.query('ROLLBACK');
+    throw erro;
+  }
+}
+
+/** Fecha a conexão (útil em scripts/testes). */
+async function fechar() {
+  if (modo === 'pg') await pool.end();
+  else await pglite.close();
+}
+
+module.exports = { init, all, get, run, transaction, fechar, modo };

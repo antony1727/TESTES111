@@ -51,16 +51,16 @@ function sobrepoe(aIni, aFim, bIni, bFim) {
  * @param {string} data            dia desejado 'YYYY-MM-DD'
  * @param {number} profissionalId  id do barbeiro escolhido
  * @param {number} duracaoMin      duração do serviço em minutos
- * @returns {string[]} horários livres 'HH:MM' em ordem crescente
+ * @returns {Promise<string[]>} horários livres 'HH:MM' em ordem crescente
  */
-function horariosVagos(data, profissionalId, duracaoMin) {
+async function horariosVagos(data, profissionalId, duracaoMin) {
   // Descobre o dia da semana (0=dom … 6=sáb). O 'T12:00:00' evita bug de fuso:
   // à meia-noite, o UTC poderia "voltar" um dia e calcular o weekday errado.
   const diaSemana = new Date(data + 'T12:00:00').getDay();
 
   // REGRA 1 — expediente: sem registro ou dia fechado = agenda vazia.
-  const func = db.prepare('SELECT * FROM horarios_funcionamento WHERE dia_semana = ?').get(diaSemana);
-  if (!func || !func.aberto) return [];
+  const func = await db.get('SELECT * FROM horarios_funcionamento WHERE dia_semana = ?', [diaSemana]);
+  if (!func || !Number(func.aberto)) return [];
 
   // Converte expediente/almoço para minutos, para comparar com aritmética.
   const abre = paraMinutos(func.abertura);
@@ -71,18 +71,18 @@ function horariosVagos(data, profissionalId, duracaoMin) {
   // REGRA 5 (coleta) — agendamentos do dia/profissional, IGNORANDO cancelados.
   // O JOIN traz a duração REAL de cada serviço, pois um combo (50min) ocupa
   // mais grade que um corte (30min), mesmo começando na mesma hora.
-  const ocupados = db.prepare(`
+  const ocupados = (await db.all(`
     SELECT a.hora, s.duracao_min FROM agendamentos a
     JOIN servicos s ON s.id = a.servico_id
     WHERE a.data = ? AND a.profissional_id = ? AND a.status != 'cancelado'
-  `).all(data, profissionalId).map((o) => {
+  `, [data, profissionalId])).map((o) => {
     const ini = paraMinutos(o.hora);
     return { ini, fim: ini + o.duracao_min };
   });
 
   // REGRA 4 (coleta) — bloqueios do dia (folgas, feriados, pausas).
   // Convenção: registro SEM hora = dia todo bloqueado → retorna [] na hora.
-  const bloqueios = db.prepare('SELECT * FROM bloqueios WHERE data = ?').all(data);
+  const bloqueios = await db.all('SELECT * FROM bloqueios WHERE data = ?', [data]);
   if (bloqueios.some((b) => !b.hora_inicio)) return [];
   // Com hora = bloqueio parcial: transforma em faixas numéricas p/ comparar.
   const faixasBloq = bloqueios

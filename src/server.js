@@ -24,9 +24,8 @@ const path = require('path'); // monta caminhos de arquivo multi-plataforma
 const express = require('express'); // framework HTTP (rotas + middlewares)
 const cors = require('cors'); // libera chamadas de outras origens (ex.: front separado)
 
-require('./db'); // 2) garante banco + tabelas (só importar já executa)
-const seed = require('./seed'); // 3a) importa a função de carga inicial…
-try { seed(); } catch {} // 3b) …e executa (idempotente: não duplica nada)
+const db = require('./db'); // 2) acesso ao Postgres (init() aplica o schema)
+const seed = require('./seed'); // 3a) importa a função de carga inicial
 
 // 4) Importa os 3 grupos de rotas (cada um é um express.Router).
 const authRoutes = require('./routes/auth'); // POST /api/auth/login
@@ -62,6 +61,20 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 // Atalho amigável: /admin entrega o painel (mesmo arquivo que /admin.html).
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'admin.html')));
 
-// ---- Sobe o servidor ---------------------------------------------------------
+// ---- Tratador de erros (nunca deixa o app cair por causa de 1 requisição) ---
+app.use((err, req, res, next) => {
+  console.error('[erro]', err.message);
+  if (res.headersSent) return next(err);
+  res.status(500).json({ erro: 'Erro interno. Tente novamente.' });
+});
+
+// ---- Sobe o servidor (depois de preparar o banco) ----------------------------
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`💈 Barber Code no ar: http://localhost:${PORT} | painel: http://localhost:${PORT}/admin`));
+(async () => {
+  await db.init(); // cria/atualiza tabelas (idempotente, não apaga dados)
+  await seed(); // garante dados iniciais (idempotente, ver seed.js)
+  app.listen(PORT, () => console.log(`💈 Barber Code no ar: http://localhost:${PORT} | painel: http://localhost:${PORT}/admin`));
+})().catch((erro) => {
+  console.error('[boot] falha ao iniciar:', erro);
+  process.exit(1);
+});
