@@ -226,14 +226,20 @@ Custo: **R$ 0** (plano free, sem cartão) e a URL já sai com o nome: `https://b
 
 ### Teste instantâneo (sem conta e sem deploy)
 
-Para mostrar no celular em 1 minuto, exponha seu PC com um túnel HTTPS grátis:
+Para mostrar no celular ou mandar para alguém em 1 minuto, use o script que já vem no projeto:
 
 ```powershell
-npm start
-# em OUTRO terminal:
-npx -y localtunnel --port 3000
-# → recebe uma URL https://....loca.lt temporária com o site no ar
+.\tunnel.ps1
 ```
+
+Ele instala o `cloudflared` (se preciso), sobe o servidor e imprime uma URL pública **HTTPS, sem tela de senha**, que abre em qualquer aparelho:
+
+```
+SITE:   https://<aleatorio>.trycloudflare.com
+PAINEL: https://<aleatorio>.trycloudflare.com/admin
+```
+
+⚠️ O link é temporário: muda a cada execução e só funciona com este PC ligado e o script aberto. Para link fixo com o nome, use o Render (Opção A) → `https://barbercode.onrender.com`.
 
 ### Opção B — Frontend separado (Vercel/Netlify) + backend no Render
 
