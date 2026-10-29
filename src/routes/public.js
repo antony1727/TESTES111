@@ -16,7 +16,7 @@
  */
 const express = require('express');
 const db = require('../db'); // consultas (async) às tabelas
-const { horariosVagos } = require('../lib/disponibilidade'); // cérebro da grade
+const { horariosVagos, horariosVagosSemana } = require('../lib/disponibilidade'); // cérebro da grade
 const emissor = require('../lib/eventos'); // avisa o painel em tempo real
 
 const router = express.Router();
@@ -57,6 +57,28 @@ router.get('/disponibilidade', rota(async (req, res) => {
   const serv = await db.get('SELECT * FROM servicos WHERE id = ?', [servico_id]);
   if (!serv) return res.status(404).json({ erro: 'Serviço não encontrado.' });
   res.json({ data, horarios: await horariosVagos(data, Number(profissional_id), serv.duracao_min) });
+}));
+
+/**
+ * GET /api/disponibilidade-semana — alimenta a SEMANA do Passo 3.
+ * Query: data_inicio (primeiro dia, 'YYYY-MM-DD'), profissional_id, servico_id.
+ * Resposta: { data_inicio, dias: [{ data, dia_semana, aberto, total, horarios }] }
+ *   • total === 0 → dia sem vaga (fechado, lotado ou bloqueado) = indisponível.
+ *   • horarios já vem junto: clicar no dia não dispara outra requisição.
+ * Uma única chamada resolve 7 dias (o frontend navega semana a semana).
+ */
+router.get('/disponibilidade-semana', rota(async (req, res) => {
+  const { data_inicio, profissional_id, servico_id } = req.query;
+  if (!data_inicio || !profissional_id || !servico_id) {
+    return res.status(400).json({ erro: 'Informe data_inicio, profissional_id e servico_id.' });
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(data_inicio)) {
+    return res.status(400).json({ erro: 'data_inicio em formato inválido (AAAA-MM-DD).' });
+  }
+  const serv = await db.get('SELECT * FROM servicos WHERE id = ?', [servico_id]);
+  if (!serv) return res.status(404).json({ erro: 'Serviço não encontrado.' });
+  const dias = await horariosVagosSemana(data_inicio, Number(profissional_id), serv.duracao_min);
+  res.json({ data_inicio, dias });
 }));
 
 /**

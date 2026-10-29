@@ -9,7 +9,7 @@
     4. <section id="agendar"> → WIZARD de agendamento em 5 passos:
          Passo 1 (etapaServicos) → escolher o serviço
          Passo 2 (etapaProfs)    → escolher o profissional
-         Passo 3 (campoData + listaHoras) → escolher dia e horário vago
+         Passo 3 (semanaDias + listaHoras) → escolher dia e horário vago
          Passo 4 (cliNome/fone/email + btnConfirmar) → dados do cliente
          Passo 5 (confirmBox + resumoFinal + btnWhats/btnIcs) → confirmação
     5. <footer class="rodape">→ link para o painel do barbeiro (/admin)
@@ -90,13 +90,20 @@
             <button class="btn ghost" data-voltar>Voltar</button><!-- todo [data-voltar] volta 1 passo -->
           </div>
         </div>
-        <!-- PASSO 3 — data + horários: input date + botões gerados via /api/disponibilidade -->
+        <!-- PASSO 3 — semana + horários: semana gerada via /api/disponibilidade-semana -->
         <div data-etapa="3" hidden>
           <h3>3 · Data e horário</h3>
-          <label for="campoData">Dia</label>
-          <input type="date" id="campoData" /><!-- JS define min=hoje (sem passado) -->
-          <label>Horários vagos</label>
-          <div id="listaHoras" class="horas"><span class="meta">Escolha uma data.</span></div>
+          <label>Escolha o dia</label>
+          <!-- Navegação entre semanas (o cliente vê 7 dias de uma vez) -->
+          <div class="semana-topo">
+            <button class="btn ghost semana-seta" id="semanaAnterior" type="button" aria-label="Semana anterior">←</button>
+            <strong id="semanaTitulo" class="meta"></strong>
+            <button class="btn ghost semana-seta" id="semanaProxima" type="button" aria-label="Próxima semana">→</button>
+          </div>
+          <!-- 7 botões de dia: lotado/fechado/passado ficam desabilitados -->
+          <div id="semanaDias" class="semana"><span class="meta">Carregando dias…</span></div>
+          <label style="margin-top:14px">Horários vagos</label>
+          <div id="listaHoras" class="horas"><span class="meta">Escolha um dia acima.</span></div>
           <div class="linha" style="margin-top:12px">
             <button class="btn ghost" data-voltar>Voltar</button>
           </div>

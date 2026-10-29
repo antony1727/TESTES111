@@ -64,7 +64,7 @@ function marcarSelecionado(container, id) {
  *  1. busca o WhatsApp da Barber Code (GET /api/config),
  *  2. busca serviços e monta a VITRINE + as opções do Passo 1,
  *  3. liga os botões "Agendar este" (atalho: já pula p/ o Passo 2),
- *  4. configura data mínima (= hoje), botões Voltar, Confirmar, .ics e Novo.
+ *  4. configura a navegação de semanas, botões Voltar, Confirmar, .ics e Novo.
  */
 async function init() {
   // 1) WhatsApp da Barber Code (vem do .env via /api/config). Se falhar, o
@@ -105,9 +105,9 @@ async function init() {
     setTimeout(async () => { await carregarProfs(); irPara(2); }, 150);
   };
 
-  // 4) Passo 3: o calendário não aceita passado (min = hoje, formato ISO).
-  $('#campoData').min = new Date().toISOString().slice(0, 10);
-  $('#campoData').onchange = carregarHoras; // trocou o dia → recarrega horários
+  // 4) Passo 3: navegação entre semanas (o cliente vê 7 dias por vez).
+  $('#semanaAnterior').onclick = () => mudarSemana(-7);
+  $('#semanaProxima').onclick = () => mudarSemana(7);
 
   // Botões "Voltar": descobrem a etapa visível e retornam uma casa.
   document.querySelectorAll('[data-voltar]').forEach((b) =>
@@ -115,6 +115,15 @@ async function init() {
       const atual = Number(document.querySelector('[data-etapa]:not([hidden])').dataset.etapa);
       irPara(Math.max(1, atual - 1));
     });
+
+  // Voltou o foco para a aba no Passo 3? Reconfere as vagas (alguém pode ter
+  // reservado enquanto o cliente estava fora) e atualiza os dias na hora.
+  document.addEventListener('visibilitychange', () => {
+    const etapa3 = document.querySelector('[data-etapa="3"]');
+    if (!document.hidden && etapa3 && !etapa3.hidden && state.profissional) {
+      carregarSemana().catch(() => {});
+    }
+  });
 
   $('#btnConfirmar').onclick = confirmar; // Passo 4 → POST que cria a reserva
   $('#btnNovo').onclick = () => location.reload(); // recomeça o wizard do zero
@@ -134,31 +143,133 @@ async function carregarProfs() {
     const card = e.target.closest('.card'); if (!card) return;
     state.profissional = profs.find((p) => p.id == card.dataset.id);
     marcarSelecionado($('#etapaProfs'), state.profissional.id);
-    setTimeout(() => irPara(3), 150);
+    // Já busca a semana ANTES de mostrar o Passo 3 (abre com os dias prontos).
+    setTimeout(async () => { await carregarSemana(); irPara(3); }, 150);
   };
 }
 
 /**
- * carregarHoras() — monta o Passo 3: com (data + profissional + serviço),
- * pede os slots livres ao backend e renderiza um botão por horário. Clicar
- * num horário salva em state.hora e avança ao Passo 4 (dados do cliente).
+ * =========================  PASSO 3 — SEMANA  ===============================
+ * O cliente vê 7 dias de uma vez (sem digitar data) e só pode clicar nos dias
+ * com vaga. Um dia fechado, bloqueado ou LOTADO aparece desabilitado — e, como
+ * os dados vêm do banco na hora, basta alguém reservar o último horário para
+ * o dia "fechar" para os próximos clientes. 🗓️
+ * ============================================================================
  */
-async function carregarHoras() {
-  state.data = $('#campoData').value; state.hora = null; // trocou o dia? reseta a hora
-  const box = $('#listaHoras');
-  if (!state.data) { box.innerHTML = '<span class="meta">Escolha uma data.</span>'; return; }
-  box.innerHTML = '<span class="meta">Buscando horários…</span>'; // feedback de loading
+const DIAS_CURTOS = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB'];
+
+/** Data local no formato ISO 'AAAA-MM-DD' (sem erro de fuso do toISOString). */
+function dataISO(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+const hojeISO = () => dataISO(new Date());
+
+/** Soma (ou subtrai) dias de uma data ISO. */
+function somarDias(iso, n) {
+  const d = new Date(iso + 'T12:00:00');
+  d.setDate(d.getDate() + n);
+  return dataISO(d);
+}
+
+/** Segunda-feira da semana da data informada (semana = seg … dom). */
+function segundaDaSemana(iso) {
+  const d = new Date(iso + 'T12:00:00');
+  const dw = d.getDay(); // 0=dom … 6=sáb
+  d.setDate(d.getDate() + (dw === 0 ? -6 : 1 - dw));
+  return dataISO(d);
+}
+
+/** '2026-11-02' → '02/11' (só para exibir). */
+const diaMes = (iso) => iso.slice(8, 10) + '/' + iso.slice(5, 7);
+
+/** Busca a semana visível no backend e desenha os 7 dias. */
+async function carregarSemana() {
+  if (!state.semanaInicio) state.semanaInicio = segundaDaSemana(hojeISO());
+  const box = $('#semanaDias');
+  box.innerHTML = '<span class="meta">Carregando dias…</span>';
   try {
-    const r = await api(`/api/disponibilidade?data=${state.data}&profissional_id=${state.profissional.id}&servico_id=${state.servico.id}`);
-    box.innerHTML = r.horarios.length
-      ? r.horarios.map((h) => `<button class="hora" data-h="${h}">${h}</button>`).join('')
-      : '<span class="meta">Sem horários vagos neste dia. Tente outra data.</span>';
-    box.querySelectorAll('.hora').forEach((b) => b.onclick = () => {
+    const r = await api(`/api/disponibilidade-semana?data_inicio=${state.semanaInicio}` +
+      `&profissional_id=${state.profissional.id}&servico_id=${state.servico.id}`);
+    state.diasSemana = r.dias; // [{data, dia_semana, aberto, total, horarios}]
+    renderSemana();
+  } catch (e) {
+    box.innerHTML = `<span class="meta">${e.message}</span>`;
+  }
+}
+
+/** Desenha os 7 botões de dia com o estado de cada um. */
+function renderSemana() {
+  const dias = state.diasSemana || [];
+  if (!dias.length) return;
+  const hoje = hojeISO();
+
+  $('#semanaTitulo').textContent = `semana de ${diaMes(dias[0].data)} a ${diaMes(dias[6].data)}`;
+  // Não deixa voltar para antes da semana atual.
+  $('#semanaAnterior').disabled = dias[0].data <= segundaDaSemana(hoje);
+
+  const box = $('#semanaDias');
+  box.innerHTML = dias.map((d) => {
+    const passou = d.data < hoje;
+    const lotado = d.total === 0;
+    const sel = state.data === d.data;
+    // Rótulo embaixo do número: passou / fechado / lotado / N vagas.
+    const rotulo = passou ? 'passou' : !d.aberto ? 'fechado' : lotado ? 'lotado' : `${d.total} vagas`;
+    const classes = ['semana-dia', passou && 'passado', lotado && 'cheio', sel && 'sel', d.data === hoje && 'hoje']
+      .filter(Boolean).join(' ');
+    return `<button type="button" class="${classes}" data-data="${d.data}" ${passou || lotado ? 'disabled' : ''}>
+      <span class="sem">${DIAS_CURTOS[d.dia_semana]}</span>
+      <span class="num">${Number(d.data.slice(8, 10))}</span>
+      <span class="vagas">${rotulo}</span>
+    </button>`;
+  }).join('');
+
+  // Só dias realmente clicáveis ganham ação.
+  box.querySelectorAll('.semana-dia:not([disabled])').forEach((b) => {
+    b.onclick = () => escolherDia(b.dataset.data);
+  });
+
+  // Nenhum dia livre na semana? Avisa e sugere a próxima.
+  if (!dias.some((d) => d.data >= hoje && d.total > 0)) {
+    box.insertAdjacentHTML('beforeend',
+      '<div class="meta" style="grid-column:1/-1;margin-top:6px">Nenhum dia com vaga nesta semana — use → para ver a próxima.</div>');
+  }
+}
+
+/** Clique num dia: guarda a data e mostra os horários que já vieram da API. */
+function escolherDia(data) {
+  state.data = data;
+  state.hora = null; // trocou o dia → zera o horário escolhido
+  document.querySelectorAll('.semana-dia').forEach((b) => b.classList.toggle('sel', b.dataset.data === data));
+  const dia = (state.diasSemana || []).find((d) => d.data === data);
+  renderHoras(dia ? dia.horarios : []);
+}
+
+/** Desenha os botões de horário; clicar num deles vai ao Passo 4. */
+function renderHoras(horarios) {
+  const box = $('#listaHoras');
+  if (!state.data) { box.innerHTML = '<span class="meta">Escolha um dia acima.</span>'; return; }
+  box.innerHTML = horarios.length
+    ? horarios.map((h) => `<button type="button" class="hora" data-h="${h}">${h}</button>`).join('')
+    : '<span class="meta">Sem horários vagos neste dia. Escolha outro dia.</span>';
+  box.querySelectorAll('.hora').forEach((b) => {
+    b.onclick = () => {
       state.hora = b.dataset.h;
       box.querySelectorAll('.hora').forEach((x) => x.classList.toggle('sel', x === b));
       setTimeout(() => irPara(4), 200);
-    });
-  } catch (e) { box.innerHTML = `<span class="meta">${e.message}</span>`; }
+    };
+  });
+}
+
+/** Navega entre semanas (7 dias), sem permitir ir para o passado. */
+function mudarSemana(delta) {
+  const atual = state.semanaInicio || segundaDaSemana(hojeISO());
+  const destino = somarDias(atual, delta);
+  if (destino < segundaDaSemana(hojeISO())) return; // não volta ao passado
+  state.semanaInicio = destino;
+  state.data = null;
+  state.hora = null;
+  $('#listaHoras').innerHTML = '<span class="meta">Escolha um dia acima.</span>';
+  carregarSemana();
 }
 
 /**
@@ -191,7 +302,16 @@ async function confirmar() {
       ? `https://wa.me/${state.whatsapp}?text=${texto}`
       : `https://wa.me/?text=${texto}`;
     irPara(5);
-  } catch (e) { erro(e.message); } finally { $('#btnConfirmar').disabled = false; }
+  } catch (e) {
+    erro(e.message);
+    // 409 = alguém pegou o horário nesse meio-tempo: volta ao Passo 3 com a
+    // semana recarregada (o dia pode ter ficado "lotado" na hora).
+    if (/indispon|ocupad/i.test(e.message)) {
+      state.semanaInicio = segundaDaSemana(state.data);
+      await carregarSemana();
+      irPara(3);
+    }
+  } finally { $('#btnConfirmar').disabled = false; }
 }
 
 /**

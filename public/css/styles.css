@@ -87,6 +87,28 @@ a { color: inherit; } /* links herdam a cor do contexto (sem azul padrão) */
 .horas { display: flex; flex-wrap: wrap; gap: 8px; } /* botões de horário quebram linha */
 .hora { padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line); background: #12100d; cursor: pointer; font-weight: 700; }
 .hora.sel { background: var(--gold2); color: #1a1405; border-color: var(--gold2); } /* horário escolhido */
+
+/* ---- Passo 3: a SEMANA inteira em 7 botões (seg … dom) ------------------- */
+.semana-topo { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.semana-topo .meta { flex: 1; text-align: center; text-transform: uppercase; letter-spacing: 1px; font-size: 11px; }
+.semana-seta { padding: 6px 12px; line-height: 1; }
+.semana-seta:disabled { opacity: .3; cursor: not-allowed; }
+.semana { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.semana-dia {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 8px 2px; border-radius: 10px; border: 1px solid var(--line);
+  background: #12100d; color: var(--txt); cursor: pointer; font: inherit;
+  transition: border-color .15s, background .15s;
+}
+.semana-dia:hover:not(:disabled) { border-color: var(--gold); }
+.semana-dia .sem { font-size: 9px; font-weight: 800; letter-spacing: .5px; color: var(--muted); }
+.semana-dia .num { font-size: 17px; font-weight: 800; line-height: 1.1; }
+.semana-dia .vagas { font-size: 8px; color: var(--gold2); white-space: nowrap; }
+.semana-dia.hoje { outline: 1px solid var(--gold); outline-offset: -1px; }
+.semana-dia.sel { background: var(--gold2); border-color: var(--gold2); color: #1a1405; }
+.semana-dia.sel .sem, .semana-dia.sel .vagas { color: #1a1405; }
+.semana-dia.cheio, .semana-dia.passado { opacity: .32; cursor: not-allowed; } /* lotado/fechado/passado */
+.semana-dia.cheio .vagas { color: #e07070; opacity: 1; }
 .linha { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; } /* fileira flexível */
 input, select, textarea {
   width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--line);

@@ -90,10 +90,13 @@ PROJETO-TESTE/
 ```
 Passo 1: GET /api/servicos ──────► clica no serviço (state.servico)
 Passo 2: GET /api/profissionais ─► clica no barbeiro (state.profissional)
-Passo 3: GET /api/disponibilidade?data & ids ► clica no horário (state.data/hora)
+Passo 3: GET /api/disponibilidade-semana ► semana inteira (7 dias) com vaga/lotado
+         (horários já vêm juntos: clicar no dia não faz nova requisição)
 Passo 4: digita nome + WhatsApp (+e-mail opcional)
 Passo 5: POST /api/agendamentos ─► resumo + wa.me pronto + download .ics
 ```
+
+> **Dias indisponíveis:** um dia que já encheu (ou está fechado/bloqueado) aparece desabilitado na semana, com o rótulo “lotado”. Ao voltar o foco na aba, a semana é recarregada; e se alguém pegar o horário no meio do caminho, o 409 devolve o cliente ao Passo 3 já atualizado.
 
 ### Cálculo de horários livres (`horariosVagos`, em `src/lib/disponibilidade.js`)
 
@@ -155,6 +158,7 @@ Base local: `http://localhost:3000`. Respostas de erro seguem o padrão `{ "erro
 | GET | `/api/servicos` | — | `[{id, nome, descricao, preco_centavos, duracao_min, ...}]` (ativos, +barato primeiro) |
 | GET | `/api/profissionais` | — | `[{id, nome, apelido, ...}]` (ativos, A–Z) |
 | GET | `/api/disponibilidade` | `?data=AAAA-MM-DD&profissional_id=N&servico_id=N` | `{data, horarios: ["09:00", ...]}` |
+| GET | `/api/disponibilidade-semana` | `?data_inicio=AAAA-MM-DD&profissional_id=N&servico_id=N` | `{dias:[{data, dia_semana, aberto, total, horarios}]}` — `total: 0` = dia indisponível (fechado/lotado) |
 | POST | `/api/agendamentos` | `{servico_id, profissional_id, data, hora, cliente_nome, cliente_telefone, cliente_email?}` | `201` + agendamento com `servico_nome`, `preco_centavos`, `profissional_nome` |
 | GET | `/api/config` | — | `{whatsapp: "5511..."}` (do `.env`, seguro expor) |
 
