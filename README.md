@@ -228,7 +228,7 @@ curl "http://localhost:3000/api/admin/resumo?data=2026-10-13" -H "Authorization:
 
 ### Opção A — Render + Neon (os dois GRÁTIS) — recomendado
 
-Custo: **R$ 0**. URL fixa: `https://barbercode.onrender.com`. Os agendamentos ficam no Neon, então **não se perdem** em restart/redeploy.
+Custo: **R$ 0**. URL fixa: `https://barbercode-2tyg.onrender.com` (o nome `barbercode` puro já estava ocupado no onrender.com). Os agendamentos ficam no Neon, então **não se perdem** em restart/redeploy.
 
 **Passo 1 — banco (Neon, ~2 min):**
 1. Acesse [neon.tech](https://neon.tech) → **Sign up with GitHub** (sem cartão).
@@ -260,11 +260,11 @@ SITE:   https://<aleatorio>.trycloudflare.com
 PAINEL: https://<aleatorio>.trycloudflare.com/admin
 ```
 
-⚠️ O link é temporário: muda a cada execução e só funciona com este PC ligado e o script aberto. Para link fixo com o nome, use o Render (Opção A) → `https://barbercode.onrender.com`.
+⚠️ O link é temporário: muda a cada execução e só funciona com este PC ligado e o script aberto. Para link fixo com o nome, use o Render (Opção A) → `https://barbercode-2tyg.onrender.com`.
 
 ### Opção B — Frontend separado (Vercel/Netlify) + backend no Render
 
-1. Backend no Render (Opção A). Anote a URL, ex.: `https://barbercode.onrender.com`.
+1. Backend no Render (Opção A). Anote a URL, ex.: `https://barbercode-2tyg.onrender.com`.
 2. Publique a pasta `public/` na Vercel/Netlify como site estático.
 3. Aponte os `fetch()` de `public/js/*.js` para a URL do backend (hoje usam caminho relativo `/api/...`, que funciona quando tudo está junto).
 

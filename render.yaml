@@ -4,7 +4,7 @@
 #  1. Crie o banco grátis no Neon (https://neon.tech) e copie a connection string.
 #  2. Abra https://render.com/deploy?repo=https://github.com/antony1727/TESTES111
 #  3. Dê "Apply" e, quando pedir DATABASE_URL, cole a string do Neon.
-#  4. Resultado: https://barbercode.onrender.com (com o nome!) + /admin
+#  4. Resultado: https://barbercode-2tyg.onrender.com (com o nome!) + /admin
 #
 # POR QUE NEON? O disco do plano free do Render é TEMPORÁRIO (os agendamentos
 # seriam apagados a cada restart). Com o Postgres do Neon (também grátis) os
@@ -13,7 +13,7 @@
 services:
   # Serviço web único: backend (API) + frontend (arquivos public/) juntos.
   - type: web
-    name: barbercode # → este nome vira a URL: https://barbercode.onrender.com
+    name: barbercode # → URL final: https://barbercode-2tyg.onrender.com
     runtime: node
     plan: free # → plano 100% grátis
     buildCommand: npm install # instala as dependências

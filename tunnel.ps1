@@ -14,7 +14,7 @@
 #   • O link muda a cada execução.
 #   • Só funciona enquanto este PC estiver ligado com este script rodando.
 #   • Para link fixo com o nome: deploy gratuito no Render (ver README,
-#     arquivo render.yaml) → https://barbercode.onrender.com
+#     arquivo render.yaml) → https://barbercode-2tyg.onrender.com
 # ============================================================================
 $ErrorActionPreference = 'Stop'
 $raiz = Split-Path -Parent $MyInvocation.MyCommand.Path

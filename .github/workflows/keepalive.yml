@@ -20,5 +20,5 @@ jobs:
     steps:
       - name: Acordar o Barber Code
         run: |
-          echo "Pingando https://barbercode.onrender.com/api/health"
-          curl -fsS --max-time 60 https://barbercode.onrender.com/api/health || echo "sem resposta (primeiro start pode demorar ~40s)"
+          echo "Pingando https://barbercode-2tyg.onrender.com/api/health"
+          curl -fsS --max-time 60 https://barbercode-2tyg.onrender.com/api/health || echo "sem resposta (primeiro start pode demorar ~50s)"
