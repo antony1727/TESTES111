@@ -1,151 +1,294 @@
 <!DOCTYPE html>
 <!-- ==========================================================================
-  index.html — ÁREA DO CLIENTE (página pública da Barber Code).
-  ----------------------------------------------------------------------------
-  ESTRUTURA DA PÁGINA (de cima para baixo):
-    1. <header class="topo">  → barra fixa com logo + botões de navegação
-    2. <section class="hero"> → chamada principal + botão "Agendar agora"
-    3. <section id="servicos">→ vitrine de serviços (preenchida via JS/API)
-    4. <section id="agendar"> → WIZARD de agendamento em 5 passos:
-         Passo 1 (etapaServicos) → escolher o serviço
-         Passo 2 (etapaProfs)    → escolher o profissional
-         Passo 3 (semanaDias + listaHoras) → escolher dia e horário vago
-         Passo 4 (cliNome/fone/email + btnConfirmar) → dados do cliente
-         Passo 5 (confirmBox + resumoFinal + btnWhats/btnIcs) → confirmação
-    5. <footer class="rodape">→ link para o painel do barbeiro (/admin)
-
-  COMO AS ETAPAS FUNCIONAM (ver js/booking.js → irPara(n)):
-    • Cada passo é uma <div data-etapa="N">; só uma fica visível por vez
-      (as demais recebem o atributo `hidden`).
-    • A barra #barraPassos acende N tracinhos dourados conforme o progresso.
+  index.html — ÁREA DO CLIENTE (wizard de agendamento).
+  --------------------------------------------------------------------------
+  PASSOS (uma <section data-etapa> visível por vez, controlada por booking.js):
+    1. Barbeiro  → cards vindos de GET /api/profissionais
+    2. Serviço   → cards vindos de GET /api/servicos
+    3. Data/Hora → semana inteira (GET /api/disponibilidade-semana) + turnos
+    4. Enviar    → ticket VIP, dados do cliente e prévia do WhatsApp
+    5. Pronto    → confirmação, WhatsApp, .ics e novo agendamento
+  O estado fica em booking.js (`state`), sem framework.
   ========================================================================== -->
-<html lang="pt-BR">
+<html lang="pt-BR" class="dark">
 <head>
   <meta charset="UTF-8" />
-  <!-- viewport = layout mobile-first: a página usa a largura real do celular -->
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#121316" />
   <title>Barber Code — Agende seu horário</title>
-  <!-- description aparece no Google/WhatsApp ao compartilhar o link -->
-  <meta name="description" content="Barber Code: agendamento online de corte, barba e combo. Escolha o serviço, o barbeiro e o horário." />
-  <!-- Domínio oficial: ajuste se publicar em outro endereço -->
-  <link rel="canonical" href="https://barbercode.app/" />
+  <meta name="description" content="Barber Code: agende corte, barba e combo em menos de 1 minuto. Escolha o barbeiro, o serviço e o melhor horário." />
+  <link rel="canonical" href="https://barbercode-2tyg.onrender.com/" />
   <meta property="og:title" content="Barber Code — Agende seu horário" />
   <meta property="og:description" content="Corte, barba e combo com agendamento online em menos de 1 minuto." />
-  <meta property="og:url" content="https://barbercode.app/" />
   <meta property="og:type" content="website" />
-  <!-- CSS global (tema dark premium). O servidor serve /css/... de public/ -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23121316'/%3E%3Ctext x='16' y='23' font-family='Arial' font-size='17' font-weight='bold' text-anchor='middle' fill='%23f2ca50'%3EBC%3C/text%3E%3C/svg%3E" />
   <link rel="stylesheet" href="/css/styles.css" />
 </head>
-<body>
-  <!-- TOPO FIXO: acompanha a rolagem (position: sticky no CSS) -->
-  <header class="topo">
-    <div class="wrap"><!-- .wrap centraliza (máx. 1080px) -->
-      <div class="logo">💈 BARBER <span>CODE</span></div><!-- span = parte dourada -->
-      <nav class="linha">
-        <a class="btn ghost small" href="#servicos">Serviços</a><!-- rola até a vitrine -->
-        <a class="btn gold small" href="#agendar">Agendar agora</a><!-- rola até o wizard -->
-      </nav>
+<body class="cliente">
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand">
+        <div class="brand-icon"><span class="material-symbols-outlined">content_cut</span></div>
+        <div class="brand-text">
+          <span class="brand-title">Barber Code</span>
+          <span class="brand-sub">Agendar</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button class="icon-btn" type="button" id="btnTopoNotif" aria-label="Ir para o agendamento">
+          <span class="material-symbols-outlined">notifications</span>
+          <span class="notif-dot"></span>
+        </button>
+        <button class="avatar-btn" type="button" id="btnTopoPerfil" aria-label="Meus dados">BC</button>
+      </div>
     </div>
   </header>
 
-  <main class="wrap">
-    <!-- HERO: primeira dobra — slogan + ação principal (conversão) -->
-    <section class="hero">
-      <div class="selo">BARBER CODE • BARBEARIA PREMIUM</div><!-- texto pequeno dourado -->
-      <h1>Seu melhor visual<br />começa aqui.</h1>
-      <p>Corte, barba e cuidado de verdade. Agende em menos de 1 minuto, sem fila e sem espera.</p>
-      <a class="btn gold" href="#agendar">Agendar agora</a><!-- CTA principal -->
-      <div class="meta" style="margin-top:10px">Ter–Sáb • 09h–19h • Resposta no WhatsApp</div>
-    </section>
+  <main class="app-main">
+    <div class="view">
+      <!-- STEPPER + RESUMO VIVO -->
+      <section class="stepper-card">
+        <div class="stepper-top">
+          <span class="eyebrow">Atendimento exclusivo</span>
+          <span class="stepper-count" id="stepCounter">Passo 1 de 4</span>
+        </div>
+        <div class="stepper-bars" aria-hidden="true">
+          <span class="step-bar on"></span>
+          <span class="step-bar"></span>
+          <span class="step-bar"></span>
+          <span class="step-bar"></span>
+        </div>
+        <div class="stepper-labels" aria-hidden="true">
+          <span class="step-label on">1. Barbeiro</span>
+          <span class="step-label">2. Serviço</span>
+          <span class="step-label">3. Data &amp; Hora</span>
+          <span class="step-label">4. Enviar</span>
+        </div>
+      </section>
 
-    <!-- VITRINE DE SERVIÇOS: cards montados pelo JS via GET /api/servicos.
-         Começa com "Carregando…" até a API responder. -->
-    <section id="servicos" class="secao">
-      <h2>Serviços &amp; preços</h2>
-      <p class="sub">Valores transparentes, duração estimada por atendimento.</p>
-      <div id="listaServicos" class="grid cols3"><div class="card">Carregando…</div></div>
-    </section>
-
-    <!-- WIZARD DE AGENDAMENTO (o coração da página) -->
-    <section id="agendar" class="secao">
-      <h2>Agende seu horário</h2>
-      <p class="sub">Passo a passo: serviço → profissional → data/hora → seus dados → confirmação.</p>
-
-      <!-- Barra de progresso: 5 tracinhos; o JS acende conforme avança -->
-      <div class="passos" id="barraPassos">
-        <div class="passo on"></div><div class="passo"></div><div class="passo"></div><div class="passo"></div><div class="passo"></div>
+      <div class="summary-pill" id="summaryPill">
+        <div class="sp-text">
+          <span class="dot pulse"></span>
+          <span id="pillText">Escolha o profissional de sua preferência</span>
+        </div>
+        <span class="sp-price" id="pillPrice">R$ 0,00</span>
       </div>
 
-      <div class="card">
-        <!-- PASSO 1 — serviço: cards clicáveis gerados pelo JS (#etapaServicos) -->
-        <div data-etapa="1">
-          <h3>1 · Escolha o serviço</h3>
-          <div id="etapaServicos" class="grid cols2"></div>
-        </div>
-        <!-- PASSO 2 — profissional: cards gerados após escolher o serviço -->
-        <div data-etapa="2" hidden>
-          <h3>2 · Escolha o profissional</h3>
-          <div id="etapaProfs" class="grid cols2"></div>
-          <div class="linha" style="margin-top:12px">
-            <button class="btn ghost" data-voltar>Voltar</button><!-- todo [data-voltar] volta 1 passo -->
-          </div>
-        </div>
-        <!-- PASSO 3 — semana + horários: semana gerada via /api/disponibilidade-semana -->
-        <div data-etapa="3" hidden>
-          <h3>3 · Data e horário</h3>
-          <label>Escolha o dia</label>
-          <!-- Navegação entre semanas (o cliente vê 7 dias de uma vez) -->
-          <div class="semana-topo">
-            <button class="btn ghost semana-seta" id="semanaAnterior" type="button" aria-label="Semana anterior">←</button>
-            <strong id="semanaTitulo" class="meta"></strong>
-            <button class="btn ghost semana-seta" id="semanaProxima" type="button" aria-label="Próxima semana">→</button>
-          </div>
-          <!-- 7 botões de dia: lotado/fechado/passado ficam desabilitados -->
-          <div id="semanaDias" class="semana"><span class="meta">Carregando dias…</span></div>
-          <label style="margin-top:14px">Horários vagos</label>
-          <div id="listaHoras" class="horas"><span class="meta">Escolha um dia acima.</span></div>
-          <div class="linha" style="margin-top:12px">
-            <button class="btn ghost" data-voltar>Voltar</button>
-          </div>
-        </div>
-        <!-- PASSO 4 — dados do cliente: sem cadastro, só nome + WhatsApp (+e-mail opcional) -->
-        <div data-etapa="4" hidden>
-          <h3>4 · Seus dados</h3>
-          <label for="cliNome">Nome</label>
-          <input id="cliNome" placeholder="Seu nome" autocomplete="name" />
-          <label for="cliFone">Telefone / WhatsApp</label>
-          <input id="cliFone" placeholder="(11) 99999-9999" inputmode="tel" /><!-- inputmode=tel abre teclado numérico -->
-          <label for="cliEmail">E-mail (opcional)</label>
-          <input id="cliEmail" placeholder="voce@email.com" type="email" />
-          <div class="linha" style="margin-top:12px">
-            <button class="btn ghost" data-voltar>Voltar</button>
-            <button class="btn gold" id="btnConfirmar">Confirmar agendamento</button><!-- POST /api/agendamentos -->
-          </div>
-        </div>
-        <!-- PASSO 5 — confirmação: resumo + ações pós-agendamento -->
-        <div data-etapa="5" hidden>
-          <h3>5 · Tudo certo! ✅</h3>
-          <div id="confirmBox" class="okbox">Agendamento criado.</div><!-- mensagem de sucesso -->
-          <div id="resumoFinal" class="resumo"></div><!-- serviço/preço/cliente -->
-          <div class="linha" style="margin-top:12px">
-            <!-- href montado pelo JS com wa.me + mensagem pronta -->
-            <a class="btn gold" id="btnWhats" target="_blank" rel="noopener">Abrir no WhatsApp</a>
-            <!-- gera e baixa um .ics (Google/Apple/Outlook) -->
-            <button class="btn" id="btnIcs">Salvar no calendário (.ics)</button>
-            <button class="btn ghost" id="btnNovo">Novo agendamento</button><!-- recarrega a página -->
-          </div>
-        </div>
-        <!-- Caixa de erro do wizard (ex.: horário ocupado, campo faltando) -->
-        <div id="msgErro" class="erro" hidden></div>
-      </div>
-    </section>
+      <div id="msgErro" class="alert alert-error" hidden></div>
 
-    <footer class="rodape">
-      Feito para a Barber Code • Painel do barbeiro em <a href="/admin">/admin</a>
-    </footer>
+      <!-- ===================== PASSO 1 — BARBEIRO ===================== -->
+      <section class="view" data-etapa="1">
+        <div class="step-head">
+          <div>
+            <h2>Escolha o barbeiro</h2>
+            <p>Profissionais disponíveis para o seu atendimento.</p>
+          </div>
+          <span class="count-pill" id="contadorProfs">—</span>
+        </div>
+        <div id="etapaProfs" class="option-list">
+          <div class="empty">Carregando profissionais…</div>
+        </div>
+      </section>
+
+      <!-- ===================== PASSO 2 — SERVIÇO ===================== -->
+      <section class="view" data-etapa="2" hidden>
+        <div class="step-head">
+          <div>
+            <h2>Tipo de corte / serviço</h2>
+            <p>Cardápio com duração e valor transparentes.</p>
+          </div>
+          <button class="step-edit" type="button" data-ir="1">
+            <span class="material-symbols-outlined">edit</span> Alterar
+          </button>
+        </div>
+        <div id="etapaServicos" class="option-list">
+          <div class="empty">Carregando serviços…</div>
+        </div>
+      </section>
+
+      <!-- ===================== PASSO 3 — DATA & HORA ===================== -->
+      <section class="view" data-etapa="3" hidden>
+        <div class="step-head">
+          <div>
+            <h2>Data &amp; horário</h2>
+            <p>A semana inteira de uma vez. Dias lotados ficam bloqueados.</p>
+          </div>
+          <button class="step-edit" type="button" data-ir="2">
+            <span class="material-symbols-outlined">edit</span> Serviço
+          </button>
+        </div>
+
+        <div>
+          <div class="week-head">
+            <span class="week-title"><span class="material-symbols-outlined">calendar_today</span> Selecione o dia</span>
+            <div class="week-nav">
+              <button type="button" id="semanaAnterior" aria-label="Semana anterior"><span class="material-symbols-outlined">chevron_left</span></button>
+              <button type="button" id="semanaProxima" aria-label="Próxima semana"><span class="material-symbols-outlined">chevron_right</span></button>
+            </div>
+          </div>
+          <div class="week-range" id="semanaTitulo">Carregando semana…</div>
+          <div id="semanaDias" class="week-days"></div>
+        </div>
+
+        <div id="listaHoras">
+          <div class="empty">
+            <span class="material-symbols-outlined">touch_app</span>
+            <b>Escolha um dia acima</b>
+            <span>Os horários livres aparecem aqui, separados por turno.</span>
+          </div>
+        </div>
+
+        <button class="btn btn-ghost btn-block" type="button" data-ir="2">
+          <span class="material-symbols-outlined">arrow_back</span> Voltar ao serviço
+        </button>
+      </section>
+
+      <!-- ===================== PASSO 4 — ENVIAR ===================== -->
+      <section class="view" data-etapa="4" hidden>
+        <div class="step-head">
+          <div>
+            <h2>Revise &amp; confirme</h2>
+            <p>Confira o ticket e informe seus dados para o WhatsApp.</p>
+          </div>
+          <button class="step-edit" type="button" data-ir="3">
+            <span class="material-symbols-outlined">edit</span> Horário
+          </button>
+        </div>
+
+        <!-- Ticket VIP -->
+        <div class="ticket">
+          <div class="ticket-head">
+            <span class="ticket-brand"><span class="material-symbols-outlined">workspace_premium</span> Barber Code VIP</span>
+            <span class="badge badge-primary">Reserva</span>
+          </div>
+          <div class="ticket-grid">
+            <div class="ticket-cell"><span>Barbeiro</span><b id="recBarbeiro">—</b></div>
+            <div class="ticket-cell"><span>Data &amp; horário</span><b class="gold" id="recData">—</b></div>
+            <div class="ticket-cell" style="grid-column:1/-1">
+              <div class="row" style="justify-content:space-between">
+                <span>Serviço</span>
+                <span class="duration" id="recDuracao">—</span>
+              </div>
+              <b id="recServico">—</b>
+            </div>
+          </div>
+          <div class="ticket-total"><span>Total a pagar</span><b id="recTotal">R$ 0,00</b></div>
+        </div>
+
+        <!-- Dados do cliente -->
+        <div class="card">
+          <div class="section-head" style="margin-bottom:10px">
+            <h2 class="section-title"><span class="material-symbols-outlined">person</span> Dados para confirmação</h2>
+          </div>
+          <div class="option-list">
+            <label class="field">
+              <span class="field-label">Seu nome completo</span>
+              <span class="input-icon">
+                <span class="material-symbols-outlined">badge</span>
+                <input id="cliNome" placeholder="Ex.: Gabriel Fontes" autocomplete="name" maxlength="80" />
+              </span>
+            </label>
+            <label class="field">
+              <span class="field-label">WhatsApp com DDD</span>
+              <span class="input-icon">
+                <span class="material-symbols-outlined">phone_iphone</span>
+                <input id="cliFone" placeholder="(11) 98765-4321" inputmode="tel" autocomplete="tel" maxlength="16" />
+              </span>
+            </label>
+            <label class="field">
+              <span class="field-label">E-mail (opcional)</span>
+              <span class="input-icon">
+                <span class="material-symbols-outlined">mail</span>
+                <input id="cliEmail" placeholder="voce@email.com" type="email" autocomplete="email" maxlength="120" />
+              </span>
+            </label>
+            <label class="field">
+              <span class="field-label">Preferência / observação (opcional)</span>
+              <span class="input-icon">
+                <span class="material-symbols-outlined">local_cafe</span>
+                <input id="cliObs" placeholder="Ex.: café sem açúcar, sem pomada com brilho" maxlength="140" />
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Prévia da mensagem -->
+        <div class="wa-preview">
+          <div class="wa-head">
+            <span class="wa-title"><span class="material-symbols-outlined">mark_chat_unread</span> Prévia do WhatsApp</span>
+            <span class="wa-badge">Auto formatada</span>
+          </div>
+          <div class="wa-body" id="waBody"></div>
+        </div>
+
+        <button class="btn btn-whats btn-block" type="button" id="btnConfirmar">
+          <span class="material-symbols-outlined">chat</span> Confirmar &amp; abrir WhatsApp
+        </button>
+        <p class="hint">A reserva é criada no sistema na hora. O WhatsApp serve para alinhar os detalhes com o atelier.</p>
+        <button class="btn btn-ghost btn-block" type="button" data-ir="3">
+          <span class="material-symbols-outlined">arrow_back</span> Voltar ao horário
+        </button>
+      </section>
+
+      <!-- ===================== PASSO 5 — PRONTO ===================== -->
+      <section class="view" data-etapa="5" hidden>
+        <div class="success-card">
+          <div class="success-icon"><span class="material-symbols-outlined">check_circle</span></div>
+          <span class="eyebrow gold">Reserva confirmada</span>
+          <h2>Horário garantido!</h2>
+          <p id="confirmBox">Seu agendamento foi criado.</p>
+          <div id="resumoFinal" class="ticket-cell" style="width:100%;text-align:left"></div>
+          <div class="success-actions">
+            <a class="btn btn-whats btn-block" id="btnWhats" target="_blank" rel="noopener">
+              <span class="material-symbols-outlined">chat</span> Abrir WhatsApp
+            </a>
+            <button class="btn btn-outline btn-block" type="button" id="btnIcs">
+              <span class="material-symbols-outlined">calendar_add_on</span> Salvar no calendário (.ics)
+            </button>
+            <button class="btn btn-ghost btn-block" type="button" id="btnNovo">
+              <span class="material-symbols-outlined">add</span> Novo agendamento
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
   </main>
 
-  <!-- Lógica da página: wizard + chamadas à API (sem framework) -->
+  <nav class="bottom-nav" aria-label="Navegação do cliente">
+    <div class="nav-inner">
+      <button class="nav-item active" type="button" data-path="agendar">
+        <span class="material-symbols-outlined">calendar_month</span><span>Agendar</span>
+      </button>
+      <button class="nav-item" type="button" data-path="servicos">
+        <span class="material-symbols-outlined">content_cut</span><span>Serviços</span>
+      </button>
+      <button class="nav-item" type="button" data-path="meus-cortes">
+        <span class="material-symbols-outlined">history_toggle_off</span><span>Meus cortes</span>
+      </button>
+      <button class="nav-item" type="button" data-path="perfil">
+        <span class="material-symbols-outlined">person</span><span>Perfil</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- Modal simples (Meus cortes / Perfil) -->
+  <div id="sheet" class="sheet-backdrop" hidden>
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitulo">
+      <div class="sheet-head">
+        <h3 id="sheetTitulo">Título</h3>
+        <button class="icon-btn" type="button" id="sheetFechar" aria-label="Fechar">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div id="sheetCorpo"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
   <script src="/js/booking.js"></script>
 </body>
 </html>

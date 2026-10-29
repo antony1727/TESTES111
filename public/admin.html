@@ -1,113 +1,277 @@
 <!DOCTYPE html>
 <!-- ==========================================================================
-  admin.html — PAINEL DO BARBEIRO / ADMIN (área privada em /admin).
-  ----------------------------------------------------------------------------
-  BLOCOS DA PÁGINA:
-    1. #telaLogin → formulário de entrada (e-mail + senha → POST /api/auth/login).
-       Visível quando NÃO há token salvo no navegador.
-    2. #painel (começa hidden) → liberado pelo JS após login válido:
-       a) "Visão geral"  → 3 KPIs: #kpiTotal (clientes), #kpiFat (R$ estimado),
-          #kpiProx (próximo horário). Vêm de GET /api/admin/resumo.
-       b) "Agenda"       → filtros (#filtroData, #filtroStatus, #btnRecarregar)
-          + tabela (#corpoAgenda) com botões por linha: ✓ concluir, ✕ cancelar,
-          excluir. Chamam PATCH/DELETE /api/admin/agendamentos/:id.
-       c) "Configurações"→ grade semanal (#gradeFunc + #btnSalvarFunc → PUT
-          /api/admin/funcionamento) e bloqueios (#bloqData/Ini/Fim/Motivo +
-          #btnBloquear → POST /api/admin/bloqueios; lista em #listaBloq).
-  O token JWT fica em localStorage ('bb_token') e é enviado em toda chamada
-  privada via header Authorization: Bearer (ver js/admin.js → api()).
+  admin.html — PAINEL DO BARBEIRO (/admin).
+  --------------------------------------------------------------------------
+  TELAS:
+    1. #telaLogin → e-mail + senha (POST /api/auth/login).
+    2. #painel    → app do barbeiro com 4 abas (bottom nav):
+       • Agenda      → KPIs do dia, cliente em destaque, próximos horários,
+                       atalhos operacionais.
+       • Comandas    → agenda completa (data + status) com todas as ações.
+       • Faturamento → valores do dia (recebido, a receber, ticket médio).
+       • Perfil      → expediente semanal, bloqueios e sair.
+  O token JWT fica em localStorage ('bb_token') e é enviado pelo js/admin.js.
   ========================================================================== -->
-<html lang="pt-BR">
+<html lang="pt-BR" class="dark">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#121316" />
   <title>Painel do Barbeiro — Barber Code</title>
-  <link rel="stylesheet" href="/css/styles.css" /><!-- mesmo tema do site -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23121316'/%3E%3Ctext x='16' y='23' font-family='Arial' font-size='17' font-weight='bold' text-anchor='middle' fill='%23f2ca50'%3EBC%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/css/styles.css" />
 </head>
-<body>
-  <header class="topo"><div class="wrap">
-    <div class="logo">💈 PAINEL <span>ADMIN</span></div>
-    <nav class="linha">
-      <a class="btn ghost small" href="/">Ver site</a><!-- volta p/ área pública -->
-      <button class="btn ghost small" id="btnSair" hidden>Sair</button><!-- apaga token -->
-    </nav>
-  </div></header>
-
-  <main class="wrap">
-    <!-- TELA DE LOGIN (única parte visível antes de autenticar) -->
-    <section id="telaLogin" class="secao" style="max-width:420px;margin:0 auto">
-      <h2>Entrar</h2>
-      <p class="sub">Acesso do barbeiro / administrador.</p>
-      <div class="card">
-        <label for="loginEmail">E-mail</label>
-        <!-- values pré-preenchidos = credenciais do seed, só p/ demonstração -->
-        <input id="loginEmail" type="email" value="admin@barbercode.app" />
-        <label for="loginSenha">Senha</label>
-        <input id="loginSenha" type="password" value="admin123" />
-        <div class="linha" style="margin-top:12px"><button class="btn gold" id="btnLogin" style="width:100%">Entrar</button></div>
-        <div id="loginErro" class="erro" hidden></div><!-- msg de falha de login -->
-        <p class="meta">Padrão do seed: admin@barbercode.app / admin123 (troque no .env).</p>
+<body class="admin">
+  <!-- ===================== TELA DE LOGIN ===================== -->
+  <section id="telaLogin" class="login-screen">
+    <form class="login-card" id="formLogin" autocomplete="on">
+      <div class="login-brand">
+        <div class="brand-icon"><span class="material-symbols-outlined">content_cut</span></div>
+        <div class="brand-text">
+          <span class="brand-title">Barber Code</span>
+          <span class="brand-sub">Painel do barbeiro</span>
+        </div>
       </div>
-    </section>
-
-    <!-- PAINEL (hidden até boot() confirmar o token) -->
-    <div id="painel" hidden>
-      <!-- a) VISÃO GERAL: 3 cards numéricos do dia selecionado no filtro -->
-      <section class="secao">
-        <h2>Visão geral — hoje</h2>
-        <p class="sub" id="hojeLbl"></p><!-- ex.: "quinta-feira, 08 de outubro" -->
-        <div class="kpis">
-          <div class="card"><div class="num" id="kpiTotal">–</div><div class="meta">clientes</div></div>
-          <div class="card"><div class="num" id="kpiFat">–</div><div class="meta">faturamento est.</div></div>
-          <div class="card"><div class="num" id="kpiProx">–</div><div class="meta">próximo horário</div></div>
+      <span class="eyebrow">Área restrita</span>
+      <h1>Bem-vindo de volta</h1>
+      <p>Entre para acompanhar a agenda, os clientes e o faturamento do dia.</p>
+      <div class="field">
+        <span class="field-label">E-mail</span>
+        <div class="input-icon">
+          <span class="material-symbols-outlined">mail</span>
+          <input id="loginEmail" type="email" value="admin@barbercode.app" autocomplete="username" required />
         </div>
-      </section>
-
-      <!-- b) AGENDA: filtros + tabela de agendamentos do dia -->
-      <section class="secao">
-        <h2>Agenda</h2>
-        <div class="linha">
-          <input type="date" id="filtroData" style="max-width:200px" /><!-- dia exibido -->
-          <select id="filtroStatus" style="max-width:200px"><!-- filtra por situação -->
-            <option value="">Todos os status</option>
-            <option value="confirmado">Confirmado</option>
-            <option value="concluido">Concluído</option>
-            <option value="cancelado">Cancelado</option>
-          </select>
-          <button class="btn" id="btnRecarregar">Atualizar</button>
+      </div>
+      <div class="field">
+        <span class="field-label">Senha</span>
+        <div class="input-icon">
+          <span class="material-symbols-outlined">lock</span>
+          <input id="loginSenha" type="password" value="admin123" autocomplete="current-password" required />
         </div>
-        <div class="card" style="margin-top:12px;overflow-x:auto"><!-- scroll horizontal no celular -->
-          <table class="tabela"><thead><tr>
-            <th>Hora</th><th>Cliente</th><th>Serviço</th><th>Barbeiro</th><th>Status</th><th>Ações</th>
-          </tr></thead><tbody id="corpoAgenda"></tbody></table><!-- linhas via JS -->
-        </div>
-      </section>
+      </div>
+      <button class="btn btn-primary btn-block" id="btnLogin" type="submit">
+        <span class="material-symbols-outlined">login</span> Entrar no painel
+      </button>
+      <div id="loginErro" class="alert alert-error" hidden></div>
+      <p class="hint">Acesso padrão do seed: admin@barbercode.app / admin123<br />Troque a senha no arquivo .env em produção.</p>
+    </form>
+  </section>
 
-      <!-- c) CONFIGURAÇÕES: expediente semanal + bloqueios -->
-      <section class="secao">
-        <h2>Configurações da agenda</h2>
-        <p class="sub">Expediente por dia da semana + bloqueios (folgas/feriados).</p>
-        <!-- 7 linhas (dom–sáb) geradas pelo JS: checkbox aberto + horários + almoço -->
-        <div id="gradeFunc" class="diasemana"></div>
-        <div class="linha" style="margin-top:10px"><button class="btn gold" id="btnSalvarFunc">Salvar expediente</button></div>
-        <!-- Bloqueio avulso: data (+faixa opcional) + motivo -->
-        <div class="card" style="margin-top:12px">
-          <h3>Bloquear dia / horário</h3>
-          <div class="linha">
-            <input type="date" id="bloqData" style="max-width:180px" />
-            <input type="time" id="bloqIni" style="max-width:130px" /><!-- vazio = dia todo -->
-            <input type="time" id="bloqFim" style="max-width:130px" />
-            <input id="bloqMotivo" placeholder="Motivo (ex: feriado)" style="flex:1;min-width:160px" />
-            <button class="btn" id="btnBloquear">Bloquear</button>
+  <!-- ===================== APLICATIVO ===================== -->
+  <div id="painel" hidden>
+    <header class="app-header">
+      <div class="header-inner">
+        <div class="brand">
+          <div class="brand-icon"><span class="material-symbols-outlined">content_cut</span></div>
+          <div class="brand-text">
+            <span class="brand-title">Barber Code</span>
+            <span class="brand-status"><span class="dot pulse" id="statusDot"></span><span id="statusTexto">Disponível</span></span>
           </div>
-          <div id="listaBloq" class="meta" style="margin-top:8px"></div><!-- bloqueios + "liberar" -->
+        </div>
+        <div class="header-actions">
+          <button class="icon-btn" id="btnNotif" type="button" aria-label="Atualizar agenda">
+            <span class="material-symbols-outlined">notifications</span>
+            <span class="notif-dot" id="notifDot" hidden></span>
+          </button>
+          <button class="avatar-btn" id="btnPerfilTopo" type="button" aria-label="Abrir perfil">BC</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="app-main">
+      <!-- ---------- ABA AGENDA ---------- -->
+      <section class="view" id="viewAgenda" data-view="agenda">
+        <div class="greeting">
+          <div>
+            <span class="eyebrow" id="saudacaoData">Atelier Barber Code</span>
+            <h1 class="page-title">Bom trabalho</h1>
+          </div>
+          <span class="chip-status" id="chipStatus"><span class="dot pulse"></span><span id="statusChip">Livre agora</span></span>
+        </div>
+
+        <div class="today-strip">
+          <span class="material-symbols-outlined">timer</span>
+          <span class="grow" id="proximoResumo">Carregando agenda…</span>
+          <button class="link-btn" id="btnAtualizarTopo" type="button">Atualizar</button>
+        </div>
+
+        <!-- 3 KPIs do dia -->
+        <div class="kpi-grid">
+          <div class="kpi">
+            <div class="kpi-head"><span id="kpiFatLabel">Hoje</span><span class="material-symbols-outlined">payments</span></div>
+            <span class="kpi-val" id="kpiFat">–</span>
+            <span class="kpi-foot" id="kpiFatFoot">faturamento</span>
+            <div class="bar"><div class="bar-fill" id="barFat"></div></div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-head"><span>Cortes</span><span class="material-symbols-outlined">content_cut</span></div>
+            <span class="kpi-val" id="kpiTotal">–</span>
+            <span class="kpi-foot" id="kpiTotalFoot">atendimentos</span>
+            <div class="bar"><div class="bar-fill" id="barTotal"></div></div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-head"><span>Próximo</span><span class="material-symbols-outlined">schedule</span></div>
+            <span class="kpi-val" id="kpiProx">–</span>
+            <span class="kpi-foot" id="kpiProxFoot">sem próximo</span>
+            <div class="bar"><div class="bar-fill" id="barProx"></div></div>
+          </div>
+        </div>
+
+        <!-- Cliente em destaque (cadeira) -->
+        <section class="client-card" id="cardAtual" aria-live="polite">
+          <div class="client-glow"></div>
+          <div id="atualConteudo"><div class="empty">Carregando cliente…</div></div>
+        </section>
+
+        <!-- Próximos horários -->
+        <section class="section">
+          <div class="section-head">
+            <h2 class="section-title"><span class="material-symbols-outlined">view_timeline</span> Próximos horários</h2>
+            <span class="count-pill" id="contadorAgenda">0 agendados</span>
+          </div>
+          <div class="segmented" id="pillsDia">
+            <button class="seg active" type="button" data-pill="hoje">Hoje</button>
+            <button class="seg" type="button" data-pill="amanha">Amanhã</button>
+            <button class="seg" type="button" data-pill="historico">Histórico</button>
+          </div>
+          <div id="listaAgenda" class="timeline"><div class="empty">Carregando agenda…</div></div>
+        </section>
+
+        <!-- Atalhos -->
+        <section class="section">
+          <span class="section-label">Atalhos operacionais</span>
+          <div class="quick-grid">
+            <a class="quick" href="/#agendar" target="_blank" rel="noopener">
+              <span class="quick-icon"><span class="material-symbols-outlined">more_time</span></span>
+              <b>Encaixe rápido</b><small>+ Novo</small>
+            </a>
+            <button class="quick" type="button" data-atalho="bloqueios">
+              <span class="quick-icon muted"><span class="material-symbols-outlined">event_busy</span></span>
+              <b>Bloquear Horário</b><small>Pausa/Folga</small>
+            </button>
+            <button class="quick" type="button" data-atalho="faturamento">
+              <span class="quick-icon tertiary"><span class="material-symbols-outlined">point_of_sale</span></span>
+              <b>Faturamento</b><small>Resumo do dia</small>
+            </button>
+          </div>
+        </section>
+      </section>
+
+      <!-- ---------- ABA COMANDAS ---------- -->
+      <section class="view" id="viewComandas" data-view="comandas" hidden>
+        <div class="view-head">
+          <div>
+            <h1>Agenda completa</h1>
+            <p>Filtre por dia e situação. As ações valem na hora.</p>
+          </div>
+          <span class="count-pill" id="comandasCount">0</span>
+        </div>
+        <div class="filters">
+          <input class="input" type="date" id="filtroData" aria-label="Data da agenda" />
+          <select class="input" id="filtroStatus" aria-label="Status dos agendamentos">
+            <option value="">Todos os status</option>
+            <option value="confirmado">Confirmados</option>
+            <option value="concluido">Concluídos</option>
+            <option value="cancelado">Cancelados</option>
+          </select>
+          <button class="btn btn-primary" id="btnRecarregar" type="button">
+            <span class="material-symbols-outlined">refresh</span> Atualizar agenda
+          </button>
+        </div>
+        <div class="today-strip">
+          <span class="material-symbols-outlined">payments</span>
+          <span class="grow" id="comandasTotal">Total do dia: —</span>
+        </div>
+        <div id="listaComandas" class="timeline"><div class="empty">Carregando…</div></div>
+      </section>
+
+      <!-- ---------- ABA FATURAMENTO ---------- -->
+      <section class="view" id="viewFaturamento" data-view="faturamento" hidden>
+        <div class="view-head">
+          <div>
+            <h1>Faturamento</h1>
+            <p id="fatDataLabel">Resumo financeiro do dia.</p>
+          </div>
+          <span class="badge badge-green">Ao vivo</span>
+        </div>
+        <input class="input" type="date" id="fatData" aria-label="Data do faturamento" />
+        <div class="stat-grid">
+          <div class="stat-card"><span class="k">Recebido</span><span class="v green" id="fatRecebido">–</span><span class="s">agendamentos concluídos</span></div>
+          <div class="stat-card"><span class="k">A receber</span><span class="v gold" id="fatReceber">–</span><span class="s">confirmados</span></div>
+          <div class="stat-card"><span class="k">Previsto total</span><span class="v" id="fatTotal">–</span><span class="s">exceto cancelados</span></div>
+          <div class="stat-card"><span class="k">Ticket médio</span><span class="v" id="fatTicket">–</span><span class="s">por atendimento</span></div>
+          <div class="stat-card"><span class="k">Atendimentos</span><span class="v" id="fatAtend">–</span><span class="s">na agenda do dia</span></div>
+          <div class="stat-card"><span class="k">Cancelados</span><span class="v red" id="fatCancelado">–</span><span class="s">valor perdido</span></div>
+        </div>
+        <div class="card">
+          <div class="section-head" style="margin-bottom:10px">
+            <h2 class="section-title"><span class="material-symbols-outlined">receipt_long</span> Detalhe do dia</h2>
+          </div>
+          <div id="fatDetalhe" class="list-simple"><div class="empty">Sem lançamentos.</div></div>
         </div>
       </section>
-    </div>
-  </main>
-  <!-- Aviso flutuante de agendamento novo (preenchido pelo js/admin.js) -->
+
+      <!-- ---------- ABA PERFIL ---------- -->
+      <section class="view" id="viewPerfil" data-view="perfil" hidden>
+        <div class="profile-card">
+          <div class="avatar" id="avatarPerfil">BC</div>
+          <div style="min-width:0">
+            <h2>Barbeiro administrador</h2>
+            <p id="perfilEmail">admin@barbercode.app</p>
+          </div>
+        </div>
+
+        <div class="row" style="flex-wrap:wrap">
+          <a class="btn btn-outline btn-sm" href="/" target="_blank" rel="noopener"><span class="material-symbols-outlined">open_in_new</span> Ver site</a>
+          <button class="btn btn-danger btn-sm" id="btnSair" type="button"><span class="material-symbols-outlined">logout</span> Sair</button>
+        </div>
+
+        <section class="section">
+          <div class="section-head">
+            <h2 class="section-title"><span class="material-symbols-outlined">calendar_month</span> Expediente semanal</h2>
+          </div>
+          <div id="gradeFunc" class="settings-list"><div class="empty">Carregando…</div></div>
+          <button class="btn btn-primary btn-block" id="btnSalvarFunc" type="button">
+            <span class="material-symbols-outlined">save</span> Salvar expediente
+          </button>
+        </section>
+
+        <section class="section">
+          <div class="section-head">
+            <h2 class="section-title"><span class="material-symbols-outlined">event_busy</span> Bloqueios</h2>
+          </div>
+          <p class="section-sub">Deixe os horários vazios para bloquear o dia inteiro.</p>
+          <div class="card-low card">
+            <div class="form-grid">
+              <label class="field full"><span class="field-label">Data</span><input class="input" type="date" id="bloqData" /></label>
+              <label class="field"><span class="field-label">Início (opcional)</span><input class="input" type="time" id="bloqIni" /></label>
+              <label class="field"><span class="field-label">Fim (opcional)</span><input class="input" type="time" id="bloqFim" /></label>
+              <label class="field full"><span class="field-label">Motivo</span><input class="input" id="bloqMotivo" placeholder="Ex.: almoço, folga, feriado" maxlength="80" /></label>
+              <button class="btn btn-outline full" id="btnBloquear" type="button">
+                <span class="material-symbols-outlined">block</span> Bloquear horário
+              </button>
+            </div>
+          </div>
+          <div id="listaBloq" class="list-simple"><div class="empty">Nenhum bloqueio.</div></div>
+        </section>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="Navegação do painel">
+      <div class="nav-inner">
+        <button class="nav-item active" type="button" data-view-btn="agenda"><span class="material-symbols-outlined">calendar_today</span><span>Agenda</span></button>
+        <button class="nav-item" type="button" data-view-btn="comandas"><span class="material-symbols-outlined">receipt_long</span><span>Comandas</span></button>
+        <button class="nav-item" type="button" data-view-btn="faturamento"><span class="material-symbols-outlined">payments</span><span>Faturamento</span></button>
+        <button class="nav-item" type="button" data-view-btn="perfil"><span class="material-symbols-outlined">badge</span><span>Perfil</span></button>
+      </div>
+    </nav>
+  </div>
+
   <div id="toast" class="toast" hidden></div>
-  <!-- Lógica do painel: login, KPIs, agenda, expediente e bloqueios -->
   <script src="/js/admin.js"></script>
 </body>
 </html>
